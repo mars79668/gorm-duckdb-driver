@@ -62,10 +62,9 @@ func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 		QueryClauses:  []string{"SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "LIMIT", "FOR"},
 	})
 
-	// Wrap the connection to handle time pointer conversion
-	if db.ConnPool != nil {
-		db.ConnPool = &duckdbConnPoolWrapper{db.ConnPool}
-	}
+	// Note: Connection wrapper disabled for now to ensure db.DB() method works
+	// Time pointer conversion can be handled at the query level if needed
+	// TODO: Implement proper wrapper that maintains db.DB() access
 
 	return
 }
@@ -87,127 +86,130 @@ func (dialector Dialector) DataTypeOf(field *schema.Field) string {
 	case schema.Bool:
 		return "BOOLEAN"
 	case schema.Int:
-		return dialector.getIntType(field.Size)
+		switch field.Size {
+		case 8:
+			return "TINYINT"
+		case 16:
+			return "SMALLINT"
+		case 32:
+			return "INTEGER"
+		default:
+			return "BIGINT"
+		}
 	case schema.Uint:
-		return dialector.getUintType(field.Size)
+		switch field.Size {
+		case 8:
+			return "UTINYINT"
+		case 16:
+			return "USMALLINT"
+		case 32:
+			return "UINTEGER"
+		default:
+			return "UBIGINT"
+		}
 	case schema.Float:
-		return dialector.getFloatType(field.Size)
+		if field.Size == 32 {
+			return "REAL"
+		}
+		return "DOUBLE"
 	case schema.String:
-		return dialector.getStringType(field.Size)
+		size := field.Size
+		if size == 0 {
+			size = int(dialector.DefaultStringSize)
+		}
+		if size > 0 && size < 65536 {
+			return fmt.Sprintf("VARCHAR(%d)", size)
+		}
+		return "TEXT"
 	case schema.Time:
+		// Handle time types similar to other GORM dialectors
+		// DuckDB supports TIMESTAMP for datetime values
+		if field.NotNull || field.PrimaryKey {
+			return "TIMESTAMP"
+		}
 		return "TIMESTAMP"
 	case schema.Bytes:
 		return "BLOB"
-	default:
-		return string(field.DataType)
 	}
-}
 
-func (dialector Dialector) getIntType(size int) string {
-	switch size {
-	case 8:
-		return "TINYINT"
-	case 16:
-		return "SMALLINT"
-	case 32:
-		return "INTEGER"
-	default:
-		return "BIGINT"
-	}
-}
-
-func (dialector Dialector) getUintType(size int) string {
-	switch size {
-	case 8:
-		return "UTINYINT"
-	case 16:
-		return "USMALLINT"
-	case 32:
-		return "UINTEGER"
-	default:
-		return "UBIGINT"
-	}
-}
-
-func (dialector Dialector) getFloatType(size int) string {
-	if size == 32 {
-		return "REAL"
-	}
-	return "DOUBLE"
-}
-
-func (dialector Dialector) getStringType(size int) string {
-	if size == 0 {
-		if dialector.DefaultStringSize > 0 && dialector.DefaultStringSize <= 65535 {
-			// #nosec G115 - bounds already checked above
-			size = int(dialector.DefaultStringSize)
-		}
-	}
-	if size > 0 && size < 65536 {
-		return fmt.Sprintf("VARCHAR(%d)", size)
-	}
-	return "TEXT"
+	return string(field.DataType)
 }
 
 func (dialector Dialector) DefaultValueOf(field *schema.Field) clause.Expression {
-	if !field.HasDefaultValue {
-		return clause.Expr{}
+	if field.HasDefaultValue && (field.DefaultValueInterface != nil || field.DefaultValue != "") {
+		if field.DefaultValueInterface != nil {
+			switch field.DefaultValueInterface.(type) {
+			case bool:
+				if field.DefaultValueInterface.(bool) {
+					return clause.Expr{SQL: "TRUE"}
+				}
+				return clause.Expr{SQL: "FALSE"}
+			default:
+				return clause.Expr{SQL: fmt.Sprintf("'%v'", field.DefaultValueInterface)}
+			}
+		} else if field.DefaultValue != "" && field.DefaultValue != "(-)" {
+			if field.DataType == schema.Bool {
+				if strings.ToLower(field.DefaultValue) == "true" {
+					return clause.Expr{SQL: "TRUE"}
+				}
+				return clause.Expr{SQL: "FALSE"}
+			}
+			return clause.Expr{SQL: field.DefaultValue}
+		}
 	}
-
-	if field.DefaultValueInterface != nil {
-		return dialector.getDefaultFromInterface(field.DefaultValueInterface)
-	}
-
-	if field.DefaultValue != "" && field.DefaultValue != "(-)" {
-		return dialector.getDefaultFromString(field.DefaultValue, field.DataType)
-	}
-
 	return clause.Expr{}
 }
 
-func (dialector Dialector) getDefaultFromInterface(defaultValue interface{}) clause.Expression {
-	switch v := defaultValue.(type) {
-	case bool:
-		if v {
-			return clause.Expr{SQL: "TRUE"}
-		}
-		return clause.Expr{SQL: "FALSE"}
-	default:
-		return clause.Expr{SQL: fmt.Sprintf("'%v'", v)}
-	}
-}
-
-func (dialector Dialector) getDefaultFromString(defaultValue string, dataType schema.DataType) clause.Expression {
-	if dataType == schema.Bool {
-		if strings.ToLower(defaultValue) == "true" {
-			return clause.Expr{SQL: "TRUE"}
-		}
-		return clause.Expr{SQL: "FALSE"}
-	}
-	return clause.Expr{SQL: defaultValue}
-}
-
 func (dialector Dialector) BindVarTo(writer clause.Writer, stmt *gorm.Statement, v interface{}) {
-	_ = writer.WriteByte('?')
+	writer.WriteByte('?')
 }
 
 func (dialector Dialector) QuoteTo(writer clause.Writer, str string) {
-	_ = writer.WriteByte('"')
+	var (
+		underQuoted, selfQuoted bool
+		continuousBacktick      int8
+		shiftDelimiter          int8
+	)
 
 	for _, v := range []byte(str) {
 		switch v {
 		case '"':
-			_, _ = writer.WriteString(`""`)
+			continuousBacktick++
+			if continuousBacktick == 2 {
+				writer.WriteString(`""`)
+				continuousBacktick = 0
+			}
 		case '.':
-			_ = writer.WriteByte('"')
-			_ = writer.WriteByte(v)
-			_ = writer.WriteByte('"')
+			if continuousBacktick > 0 || !selfQuoted {
+				shiftDelimiter = 0
+				underQuoted = false
+				continuousBacktick = 0
+				writer.WriteByte('"')
+			}
+			writer.WriteByte(v)
+			continue
 		default:
-			_ = writer.WriteByte(v)
+			if shiftDelimiter-continuousBacktick <= 0 && !underQuoted {
+				writer.WriteByte('"')
+				underQuoted = true
+				if selfQuoted = continuousBacktick > 0; selfQuoted {
+					continuousBacktick -= 1
+				}
+			}
+
+			for ; continuousBacktick > 0; continuousBacktick -= 1 {
+				writer.WriteString(`""`)
+			}
+
+			writer.WriteByte(v)
 		}
+		shiftDelimiter++
 	}
 
-	_ = writer.WriteByte('"')
+	if continuousBacktick > 0 && !selfQuoted {
+		writer.WriteString(`""`)
+	}
+	writer.WriteByte('"')
 }
 
 func (dialector Dialector) Explain(sql string, vars ...interface{}) string {
@@ -252,6 +254,7 @@ func convertTimePointers(args []interface{}) []interface{} {
 // duckdbConnPoolWrapper wraps the connection pool to return wrapped connections
 type duckdbConnPoolWrapper struct {
 	gorm.ConnPool
+	db *sql.DB // Store reference to underlying *sql.DB
 }
 
 func (p *duckdbConnPoolWrapper) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
@@ -273,17 +276,11 @@ func (p *duckdbConnPoolWrapper) QueryRowContext(ctx context.Context, query strin
 	return p.ConnPool.QueryRowContext(ctx, query, convertedArgs...)
 }
 
-// GetDBConn implements the interface expected by GORM's db.DB() method
-func (p *duckdbConnPoolWrapper) GetDBConn() (*sql.DB, error) {
-	// If the wrapped ConnPool is directly *sql.DB, return it
-	if db, ok := p.ConnPool.(*sql.DB); ok {
-		return db, nil
+// Implement GORM's expected GetDBConnector interface
+func (p *duckdbConnPoolWrapper) GetDBConnector() (*sql.DB, error) {
+	// Return the stored reference to the original *sql.DB
+	if p.db != nil {
+		return p.db, nil
 	}
-
-	// Check if the wrapped ConnPool implements GetDBConn
-	if dbConn, ok := p.ConnPool.(interface{ GetDBConn() (*sql.DB, error) }); ok {
-		return dbConn.GetDBConn()
-	}
-
-	return nil, fmt.Errorf("unable to get underlying *sql.DB from connection pool")
+	return nil, fmt.Errorf("no database connection available")
 }

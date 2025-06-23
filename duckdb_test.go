@@ -201,9 +201,15 @@ func TestDBMethod(t *testing.T) {
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
 
+	// Check if ConnPool is set
+	if db.ConnPool == nil {
+		t.Fatal("db.ConnPool is nil")
+	}
+
 	// Test getting the underlying *sql.DB
 	sqlDB, err := db.DB()
 	if err != nil {
+		t.Logf("ConnPool type: %T", db.ConnPool)
 		t.Fatalf("Failed to get *sql.DB: %v", err)
 	}
 

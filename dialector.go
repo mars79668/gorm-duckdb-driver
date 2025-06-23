@@ -273,15 +273,16 @@ func (p *duckdbConnPoolWrapper) QueryRowContext(ctx context.Context, query strin
 	return p.ConnPool.QueryRowContext(ctx, query, convertedArgs...)
 }
 
-// Implement GetDBConnector interface to allow access to underlying *sql.DB
-func (p *duckdbConnPoolWrapper) GetDBConnector() (*sql.DB, error) {
-	if dbConnector, ok := p.ConnPool.(interface{ GetDBConnector() (*sql.DB, error) }); ok {
-		return dbConnector.GetDBConnector()
-	}
-
+// GetDBConn implements the interface expected by GORM's db.DB() method
+func (p *duckdbConnPoolWrapper) GetDBConn() (*sql.DB, error) {
 	// If the wrapped ConnPool is directly *sql.DB, return it
 	if db, ok := p.ConnPool.(*sql.DB); ok {
 		return db, nil
+	}
+
+	// Check if the wrapped ConnPool implements GetDBConn
+	if dbConn, ok := p.ConnPool.(interface{ GetDBConn() (*sql.DB, error) }); ok {
+		return dbConn.GetDBConn()
 	}
 
 	return nil, fmt.Errorf("unable to get underlying *sql.DB from connection pool")

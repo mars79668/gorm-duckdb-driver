@@ -193,3 +193,43 @@ func TestMigration(t *testing.T) {
 		t.Error("Expected extra column to exist after migration")
 	}
 }
+
+func TestDBMethod(t *testing.T) {
+	// Test that db.DB() method works correctly
+	db, err := gorm.Open(Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("Failed to connect to database: %v", err)
+	}
+
+	// Test getting the underlying *sql.DB
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("Failed to get *sql.DB: %v", err)
+	}
+
+	if sqlDB == nil {
+		t.Fatal("db.DB() returned nil - this should not happen")
+	}
+
+	// Test ping
+	if err := sqlDB.Ping(); err != nil {
+		t.Fatalf("Failed to ping database: %v", err)
+	}
+
+	// Test setting connection pool settings
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetMaxOpenConns(10)
+
+	// Test getting stats
+	stats := sqlDB.Stats()
+	if stats.MaxOpenConnections != 10 {
+		t.Errorf("Expected MaxOpenConnections to be 10, got %d", stats.MaxOpenConnections)
+	}
+
+	// Test close (this should work for cleanup)
+	defer func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Errorf("Failed to close database: %v", err)
+		}
+	}()
+}

@@ -5,6 +5,29 @@ All notable changes to the GORM DuckDB driver will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2025-06-22
+
+### Fixed
+
+- **Critical**: Fixed `db.DB()` method returning `nil` by implementing correct `GetDBConn()` interface
+- Added comprehensive test coverage for `db.DB()` method functionality
+- Resolved issue where external projects couldn't access underlying `*sql.DB` instance
+
+### Changed
+
+- Corrected interface method name from `GetDBConnector()` to `GetDBConn()` to match GORM expectations
+- Enhanced test suite with specific `db.DB()` method validation
+
+### Technical Details
+
+The connection pool wrapper now properly implements the `GetDBConn() (*sql.DB, error)` interface that GORM's `db.DB()` method expects. This resolves the critical issue where:
+
+- `db.DB()` was returning `nil` instead of the underlying `*sql.DB` instance
+- External projects couldn't perform database cleanup or connection management
+- Integration tests failed when trying to close database connections
+
+This fix ensures full compatibility with GORM's standard database access patterns.
+
 ## [0.1.2] - 2025-06-22
 
 ### Fixed

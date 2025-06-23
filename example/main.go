@@ -213,5 +213,29 @@ func main() {
 	columnTypes, _ := db.Migrator().ColumnTypes(&User{})
 	fmt.Printf("User table has %d columns\n", len(columnTypes))
 
+	// Test access to underlying *sql.DB
+	fmt.Println("\n=== Testing *sql.DB Access ===")
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatal("Failed to get *sql.DB:", err)
+	}
+
+	// Test ping
+	if err := sqlDB.Ping(); err != nil {
+		log.Fatal("Failed to ping database:", err)
+	}
+
+	// Set connection pool settings
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(100)
+
+	// Get stats
+	stats := sqlDB.Stats()
+	fmt.Printf("✅ Successfully accessed *sql.DB!\n")
+	fmt.Printf("   - Max open connections: %d\n", stats.MaxOpenConnections)
+	fmt.Printf("   - Open connections: %d\n", stats.OpenConnections)
+	fmt.Printf("   - In use: %d\n", stats.InUse)
+	fmt.Printf("   - Idle: %d\n", stats.Idle)
+
 	fmt.Println("\n🎉 DuckDB GORM Driver Demo Complete!")
 }

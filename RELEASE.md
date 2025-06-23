@@ -33,7 +33,7 @@
 
 **Open an Issue in Main GORM Repo:**
 
-- Repository: https://github.com/go-gorm/gorm
+- Repository: [https://github.com/go-gorm/]
 - Title: `[RFC] DuckDB Driver for GORM - Request for Feedback`
 - Content:
 
@@ -69,63 +69,4 @@
 
   The driver is ready for community testing. Looking forward to your thoughts!
   ```
-
-### 2. Go Community Outreach
-
-- **Reddit**: Post in /r/golang about the new driver
-- **Hacker News**: Share the repository
-- **Go Forums**: Announce in golang-nuts mailing list
-- **Twitter/X**: Tweet about the release with #golang #gorm #duckdb
-
-### 3. DuckDB Community
-
-- **DuckDB Discord**: Share in integrations channel
-- **DuckDB Discussions**: Post about Go/GORM integration
-
-## Documentation for Release
-
-### GitHub Release Notes Template
-
-```markdown
-# GORM DuckDB Driver v0.1.0 🚀
-
-First public release of the DuckDB driver for GORM!
-
-## 🎯 What is this?
-A production-ready adapter that brings DuckDB's high-performance analytical capabilities to the GORM ecosystem. Perfect for data science, analytics, and high-throughput applications.
-
-## ✨ Features
-- **Complete GORM Integration**: All dialector and migrator interfaces implemented
-- **Auto-increment Support**: Uses DuckDB sequences for ID generation
-- **Type Safety**: Comprehensive Go ↔ DuckDB type mapping
-- **Connection Pooling**: Optimized connection handling with time conversion
-- **Schema Introspection**: Full table, column, index, and constraint discovery
-- **Test Coverage**: 100% test pass rate with comprehensive test suite
-
-## 🚀 Quick Start
-
-```go
-import (
-    "gorm.io/gorm"
-    "github.com/greysquirr3l/gorm-duckdb-driver"
-)
-
-db, err := gorm.Open(duckdb.Open("test.db"), &gorm.Config{})
-```
-
-## 📊 Perfect For
-
-- Data analytics and OLAP workloads
-- High-performance read operations
-- Data science applications
-- ETL pipelines
-- Analytical dashboards
-
-## 🤝 Contributing
-
-This project aims for inclusion in the official go-gorm organization.
-See CONTRIBUTING.md for development setup and guidelines.
-
-## 📄 License
-
-MIT License
+  

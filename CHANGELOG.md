@@ -5,6 +5,34 @@ All notable changes to the GORM DuckDB driver will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2025-06-22
+
+### Fixed
+
+- **Code Quality**: Reduced cyclomatic complexity in key functions (`DataTypeOf`, `DefaultValueOf`, `QuoteTo`, `FullDataTypeOf`)
+- **Error Handling**: Fixed all unchecked error returns from writer operations
+- **Type Safety**: Resolved integer overflow concerns in size conversions
+- **Formatting**: Applied consistent code formatting with gofumpt
+- **Linting**: Addressed all golangci-lint issues including errcheck, gocritic, gosec, and staticcheck warnings
+
+### Changed
+
+- Refactored `DataTypeOf` function to use helper methods for better maintainability
+- Simplified `QuoteTo` function logic while maintaining functionality
+- Improved error handling throughout codebase with proper return value checking
+- Enhanced type switch optimization for better performance
+- Removed redundant embedded field selectors in migrator
+
+### Technical Details
+
+This release focuses on code quality improvements and linting compliance:
+
+- Split complex functions into smaller, more manageable helper functions
+- Added proper error handling for all writer operations
+- Implemented type assertions and error checking best practices
+- Reduced cyclomatic complexity from 22+ to under 10 for all functions
+- Ensured all golangci-lint checks pass with zero issues
+
 ## [0.1.1] - 2025-06-22
 
 ### Fixed

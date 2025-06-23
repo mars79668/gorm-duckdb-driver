@@ -87,130 +87,127 @@ func (dialector Dialector) DataTypeOf(field *schema.Field) string {
 	case schema.Bool:
 		return "BOOLEAN"
 	case schema.Int:
-		switch field.Size {
-		case 8:
-			return "TINYINT"
-		case 16:
-			return "SMALLINT"
-		case 32:
-			return "INTEGER"
-		default:
-			return "BIGINT"
-		}
+		return dialector.getIntType(field.Size)
 	case schema.Uint:
-		switch field.Size {
-		case 8:
-			return "UTINYINT"
-		case 16:
-			return "USMALLINT"
-		case 32:
-			return "UINTEGER"
-		default:
-			return "UBIGINT"
-		}
+		return dialector.getUintType(field.Size)
 	case schema.Float:
-		if field.Size == 32 {
-			return "REAL"
-		}
-		return "DOUBLE"
+		return dialector.getFloatType(field.Size)
 	case schema.String:
-		size := field.Size
-		if size == 0 {
-			size = int(dialector.DefaultStringSize)
-		}
-		if size > 0 && size < 65536 {
-			return fmt.Sprintf("VARCHAR(%d)", size)
-		}
-		return "TEXT"
+		return dialector.getStringType(field.Size)
 	case schema.Time:
-		// Handle time types similar to other GORM dialectors
-		// DuckDB supports TIMESTAMP for datetime values
-		if field.NotNull || field.PrimaryKey {
-			return "TIMESTAMP"
-		}
 		return "TIMESTAMP"
 	case schema.Bytes:
 		return "BLOB"
+	default:
+		return string(field.DataType)
 	}
+}
 
-	return string(field.DataType)
+func (dialector Dialector) getIntType(size int) string {
+	switch size {
+	case 8:
+		return "TINYINT"
+	case 16:
+		return "SMALLINT"
+	case 32:
+		return "INTEGER"
+	default:
+		return "BIGINT"
+	}
+}
+
+func (dialector Dialector) getUintType(size int) string {
+	switch size {
+	case 8:
+		return "UTINYINT"
+	case 16:
+		return "USMALLINT"
+	case 32:
+		return "UINTEGER"
+	default:
+		return "UBIGINT"
+	}
+}
+
+func (dialector Dialector) getFloatType(size int) string {
+	if size == 32 {
+		return "REAL"
+	}
+	return "DOUBLE"
+}
+
+func (dialector Dialector) getStringType(size int) string {
+	if size == 0 {
+		if dialector.DefaultStringSize > 0 && dialector.DefaultStringSize <= 65535 {
+			// #nosec G115 - bounds already checked above
+			size = int(dialector.DefaultStringSize)
+		}
+	}
+	if size > 0 && size < 65536 {
+		return fmt.Sprintf("VARCHAR(%d)", size)
+	}
+	return "TEXT"
 }
 
 func (dialector Dialector) DefaultValueOf(field *schema.Field) clause.Expression {
-	if field.HasDefaultValue && (field.DefaultValueInterface != nil || field.DefaultValue != "") {
-		if field.DefaultValueInterface != nil {
-			switch field.DefaultValueInterface.(type) {
-			case bool:
-				if field.DefaultValueInterface.(bool) {
-					return clause.Expr{SQL: "TRUE"}
-				}
-				return clause.Expr{SQL: "FALSE"}
-			default:
-				return clause.Expr{SQL: fmt.Sprintf("'%v'", field.DefaultValueInterface)}
-			}
-		} else if field.DefaultValue != "" && field.DefaultValue != "(-)" {
-			if field.DataType == schema.Bool {
-				if strings.ToLower(field.DefaultValue) == "true" {
-					return clause.Expr{SQL: "TRUE"}
-				}
-				return clause.Expr{SQL: "FALSE"}
-			}
-			return clause.Expr{SQL: field.DefaultValue}
-		}
+	if !field.HasDefaultValue {
+		return clause.Expr{}
 	}
+
+	if field.DefaultValueInterface != nil {
+		return dialector.getDefaultFromInterface(field.DefaultValueInterface)
+	}
+
+	if field.DefaultValue != "" && field.DefaultValue != "(-)" {
+		return dialector.getDefaultFromString(field.DefaultValue, field.DataType)
+	}
+
 	return clause.Expr{}
 }
 
+func (dialector Dialector) getDefaultFromInterface(defaultValue interface{}) clause.Expression {
+	switch v := defaultValue.(type) {
+	case bool:
+		if v {
+			return clause.Expr{SQL: "TRUE"}
+		}
+		return clause.Expr{SQL: "FALSE"}
+	default:
+		return clause.Expr{SQL: fmt.Sprintf("'%v'", v)}
+	}
+}
+
+func (dialector Dialector) getDefaultFromString(defaultValue string, dataType schema.DataType) clause.Expression {
+	if dataType == schema.Bool {
+		if strings.ToLower(defaultValue) == "true" {
+			return clause.Expr{SQL: "TRUE"}
+		}
+		return clause.Expr{SQL: "FALSE"}
+	}
+	return clause.Expr{SQL: defaultValue}
+}
+
 func (dialector Dialector) BindVarTo(writer clause.Writer, stmt *gorm.Statement, v interface{}) {
-	writer.WriteByte('?')
+	_ = writer.WriteByte('?')
 }
 
 func (dialector Dialector) QuoteTo(writer clause.Writer, str string) {
-	var (
-		underQuoted, selfQuoted bool
-		continuousBacktick      int8
-		shiftDelimiter          int8
-	)
+	_ = writer.WriteByte('"')
 
 	for _, v := range []byte(str) {
 		switch v {
 		case '"':
-			continuousBacktick++
-			if continuousBacktick == 2 {
-				writer.WriteString(`""`)
-				continuousBacktick = 0
-			}
+			_, _ = writer.WriteString(`""`)
 		case '.':
-			if continuousBacktick > 0 || !selfQuoted {
-				shiftDelimiter = 0
-				underQuoted = false
-				continuousBacktick = 0
-				writer.WriteByte('"')
-			}
-			writer.WriteByte(v)
-			continue
+			_ = writer.WriteByte('"')
+			_ = writer.WriteByte(v)
+			_ = writer.WriteByte('"')
 		default:
-			if shiftDelimiter-continuousBacktick <= 0 && !underQuoted {
-				writer.WriteByte('"')
-				underQuoted = true
-				if selfQuoted = continuousBacktick > 0; selfQuoted {
-					continuousBacktick -= 1
-				}
-			}
-
-			for ; continuousBacktick > 0; continuousBacktick -= 1 {
-				writer.WriteString(`""`)
-			}
-
-			writer.WriteByte(v)
+			_ = writer.WriteByte(v)
 		}
-		shiftDelimiter++
 	}
 
-	if continuousBacktick > 0 && !selfQuoted {
-		writer.WriteString(`""`)
-	}
-	writer.WriteByte('"')
+	_ = writer.WriteByte('"')
 }
 
 func (dialector Dialector) Explain(sql string, vars ...interface{}) string {

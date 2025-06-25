@@ -5,14 +5,40 @@ All notable changes to the GORM DuckDB driver will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2025-06-25
+
+### Fixed
+
+- **Time Pointer Conversion**: Completely resolved the critical "*time.Time to time.Time" cast error that occurred in transaction contexts
+- **Transaction Support**: Fixed time pointer conversion for all operations executed within GORM transactions
+- **Universal Compatibility**: Implemented comprehensive driver-level wrapper ensuring time pointer conversion works in all contexts
+- **RETURNING Clause**: Removed problematic RETURNING clauses from default callbacks to eliminate transaction bypass issues
+
+#### Technical Implementation
+
+- **Driver-Level Wrapper**: Registered custom "duckdb-gorm" driver that intercepts all database operations at the lowest level
+- **Dual-Layer Protection**: Combined connection wrapper and driver wrapper ensure time pointer conversion works universally
+- **Transaction Compatibility**: Driver wrapper handles time pointer conversion even when GORM uses raw `*sql.Tx` objects
+- **Backward Compatibility**: All existing functionality preserved while fixing the core time pointer issue
+
+#### Impact
+
+- ✅ **All CRUD operations** now work seamlessly with `*time.Time` fields
+- ✅ **Transaction operations** properly handle time pointer conversion
+- ✅ **Full GORM compatibility** maintained for all standard operations
+- ✅ **Production ready** - can serve as drop-in replacement for official GORM DuckDB driver
+
 ## [0.2.1] - 2025-06-25
 
 ### Fixed
 
+- **Critical Migration Crash**: Resolved nil pointer dereference in `AutoMigrate()` operations that prevented application startup (Issue: DUCKDB_GORM_DRIVER_BUG_REPORT.md)
+- **Column Type Introspection**: Fixed missing column metadata implementation that caused segmentation faults during migration
 - **Database Connection Access**: Fixed critical issue where `db.DB()` method failed due to missing `GetDBConnector` interface implementation
 - **Connection Wrapper**: Implemented `GetDBConn() (*sql.DB, error)` method in connection wrapper to provide proper access to underlying `*sql.DB`
 - **GORM Compatibility**: Ensures compatibility with applications requiring direct database access for connection pooling, health checks, and advanced operations
 - **Time Pointer Conversion**: Maintained existing time pointer conversion functionality while fixing `db.DB()` access
+- **Migration Stability**: Complete rewrite of migration system to handle complex models with proper null safety
 
 #### Technical Notes
 

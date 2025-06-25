@@ -7,29 +7,6 @@ import (
 	"strings"
 )
 
-// isSliceType checks if a type is a supported slice type for DuckDB arrays
-func isSliceType(t reflect.Type) bool {
-	if t.Kind() != reflect.Slice {
-		return false
-	}
-
-	elem := t.Elem()
-	switch elem.Kind() {
-	case reflect.Float32, reflect.Float64:
-		return true
-	case reflect.String:
-		return true
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return true
-	case reflect.Bool:
-		return true
-	default:
-		return false
-	}
-}
-
 // formatSliceForDuckDB converts a Go slice to DuckDB array literal syntax
 func formatSliceForDuckDB(value interface{}) (string, error) {
 	v := reflect.ValueOf(value)

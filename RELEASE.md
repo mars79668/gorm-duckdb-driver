@@ -7,7 +7,7 @@
 - [x] Documentation is complete and accurate
 - [x] Example application works correctly
 - [x] CHANGELOG.md is updated
-- [x] Version tag created (v0.1.0)
+- [x] Version tag created (v0.2.1)
 
 ## GitHub Repository Setup
 
@@ -87,20 +87,36 @@
 ### GitHub Release Notes Template
 
 ```markdown
-# GORM DuckDB Driver v0.1.0 🚀
 
-First public release of the DuckDB driver for GORM!
+**Title:** `GORM DuckDB Driver v0.2.1 🚀`
+
+**Content:**
+
+# GORM DuckDB Driver v0.2.1 🚀
+
+Bugfix release with improved GORM compatibility and extension support!
 
 ## 🎯 What is this?
+
 A production-ready adapter that brings DuckDB's high-performance analytical capabilities to the GORM ecosystem. Perfect for data science, analytics, and high-throughput applications.
 
 ## ✨ Features
+
 - **Complete GORM Integration**: All dialector and migrator interfaces implemented
+- **DuckDB Extension Support**: Comprehensive extension management system
 - **Auto-increment Support**: Uses DuckDB sequences for ID generation
 - **Type Safety**: Comprehensive Go ↔ DuckDB type mapping
 - **Connection Pooling**: Optimized connection handling with time conversion
 - **Schema Introspection**: Full table, column, index, and constraint discovery
 - **Test Coverage**: 100% test pass rate with comprehensive test suite
+
+## 🆕 What's New in v0.2.1
+
+- Fixed `db.DB()` method compatibility with GORM
+- Integrated time pointer conversion into connection wrapper
+- Comprehensive DuckDB extension support
+- Cleaned up array/vector support (now optional utilities only)
+- Updated documentation and examples
 
 ## 🚀 Quick Start
 

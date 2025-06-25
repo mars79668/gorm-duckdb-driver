@@ -1,15 +1,13 @@
-module example
+module debug
 
 go 1.24
 
 toolchain go1.24.4
 
 require (
-	gorm.io/driver/duckdb v1.0.0
+	gorm.io/driver/duckdb v0.0.0
 	gorm.io/gorm v1.25.12
 )
-
-replace gorm.io/driver/duckdb => ../
 
 require (
 	github.com/apache/arrow-go/v18 v18.1.0 // indirect
@@ -40,3 +38,5 @@ require (
 	golang.org/x/tools v0.33.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 )
+
+replace gorm.io/driver/duckdb => ../

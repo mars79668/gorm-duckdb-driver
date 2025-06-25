@@ -1,19 +1,38 @@
+# golangci-lint configuration for MCP YardGopher
 version: "2"
 
+run:
+  timeout: 5m
+  tests: true
+
 linters:
-  default: standard
   enable:
-    - cyclop
-    - gocritic
-    - gosec
+    # Default linters (enabled by default)
+    - errcheck
+    - govet
     - ineffassign
+    - staticcheck
+    - unused
+    
+    # Additional useful linters
+    - bodyclose
+    - goconst
+    - gocritic
+    - gocyclo
+    - gosec
     - misspell
-    - prealloc
+    - nakedret
+    - rowserrcheck
     - unconvert
     - unparam
     - whitespace
 
+  disable:
+    - funlen
+    - godox
+    - godot
+
 formatters:
   enable:
-    - gofumpt
+    - gofmt
     - goimports

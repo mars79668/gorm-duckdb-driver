@@ -15,12 +15,13 @@ type Migrator struct {
 }
 
 func (m Migrator) CurrentDatabase() (name string) {
-	m.Migrator.DB.Raw("SELECT current_database()").Row().Scan(&name)
+	_ = m.DB.Raw("SELECT current_database()").Row().Scan(&name)
 	return
 }
 
-func (m Migrator) FullDataTypeOf(field *schema.Field) (expr clause.Expr) {
-	expr.SQL = m.Migrator.DataTypeOf(field)
+func (m Migrator) FullDataTypeOf(field *schema.Field) clause.Expr {
+	expr := clause.Expr{}
+	expr.SQL = m.DataTypeOf(field)
 
 	if field.NotNull {
 		expr.SQL += " NOT NULL"
@@ -32,15 +33,15 @@ func (m Migrator) FullDataTypeOf(field *schema.Field) (expr clause.Expr) {
 
 	// Handle auto-increment for primary key fields using sequences
 	if field.AutoIncrement && field.PrimaryKey {
-		sequenceName := m.Migrator.DB.NamingStrategy.IndexName(field.Schema.Table, field.DBName) + "_seq"
+		sequenceName := m.DB.NamingStrategy.IndexName(field.Schema.Table, field.DBName) + "_seq"
 		expr.SQL += " DEFAULT nextval('" + sequenceName + "')"
 	}
 
 	if field.HasDefaultValue && (field.DefaultValueInterface != nil || field.DefaultValue != "") {
 		if field.DefaultValueInterface != nil {
 			defaultStmt := &gorm.Statement{Vars: []interface{}{field.DefaultValueInterface}}
-			m.Migrator.Dialector.BindVarTo(defaultStmt, defaultStmt, field.DefaultValueInterface)
-			expr.SQL += " DEFAULT " + m.Migrator.Dialector.Explain(defaultStmt.SQL.String(), field.DefaultValueInterface)
+			m.Dialector.BindVarTo(defaultStmt, defaultStmt, field.DefaultValueInterface)
+			expr.SQL += " DEFAULT " + m.Dialector.Explain(defaultStmt.SQL.String(), field.DefaultValueInterface)
 		} else if field.DefaultValue != "(-)" {
 			expr.SQL += " DEFAULT " + field.DefaultValue
 		}
@@ -50,7 +51,7 @@ func (m Migrator) FullDataTypeOf(field *schema.Field) (expr clause.Expr) {
 		expr.SQL += " COMMENT '" + field.Comment + "'"
 	}
 
-	return
+	return expr
 }
 
 func (m Migrator) AlterColumn(value interface{}, field string) error {
@@ -121,8 +122,8 @@ func (m Migrator) DropConstraint(value interface{}, name string) error {
 func (m Migrator) HasTable(value interface{}) bool {
 	var count int64
 
-	m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error {
-		return m.Migrator.DB.Raw(
+	_ = m.RunWithValue(value, func(stmt *gorm.Statement) error {
+		return m.DB.Raw(
 			"SELECT count(*) FROM information_schema.tables WHERE table_name = ? AND table_type = 'BASE TABLE'",
 			stmt.Table,
 		).Row().Scan(&count)
@@ -132,7 +133,7 @@ func (m Migrator) HasTable(value interface{}) bool {
 }
 
 func (m Migrator) GetTables() (tableList []string, err error) {
-	err = m.Migrator.DB.Raw(
+	err = m.DB.Raw(
 		"SELECT table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE'",
 	).Scan(&tableList).Error
 	return
@@ -140,7 +141,7 @@ func (m Migrator) GetTables() (tableList []string, err error) {
 
 func (m Migrator) HasColumn(value interface{}, field string) bool {
 	var count int64
-	m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error {
+	_ = m.RunWithValue(value, func(stmt *gorm.Statement) error {
 		name := field
 		if stmt.Schema != nil {
 			if field := stmt.Schema.LookUpField(field); field != nil {
@@ -148,7 +149,7 @@ func (m Migrator) HasColumn(value interface{}, field string) bool {
 			}
 		}
 
-		return m.Migrator.DB.Raw(
+		return m.DB.Raw(
 			"SELECT count(*) FROM information_schema.columns WHERE table_name = ? AND column_name = ?",
 			stmt.Table, name,
 		).Row().Scan(&count)
@@ -159,14 +160,14 @@ func (m Migrator) HasColumn(value interface{}, field string) bool {
 
 func (m Migrator) HasIndex(value interface{}, name string) bool {
 	var count int64
-	m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error {
+	_ = m.RunWithValue(value, func(stmt *gorm.Statement) error {
 		if stmt.Schema != nil {
 			if idx := stmt.Schema.LookIndex(name); idx != nil {
 				name = idx.Name
 			}
 		}
 
-		return m.Migrator.DB.Raw(
+		return m.DB.Raw(
 			"SELECT count(*) FROM information_schema.statistics WHERE table_name = ? AND index_name = ?",
 			stmt.Table, name,
 		).Row().Scan(&count)

@@ -122,7 +122,9 @@ func (m *ExtensionManager) ListExtensions() ([]Extension, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query extensions: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	for rows.Next() {
 		var ext Extension

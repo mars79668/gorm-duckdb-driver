@@ -54,7 +54,7 @@ func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 		dialector.DefaultStringSize = 256
 	}
 
-	// Register callbacks first
+	// Register callbacks
 	callbacks.RegisterDefaultCallbacks(db, &callbacks.Config{
 		CreateClauses: []string{"INSERT", "VALUES", "ON CONFLICT", "RETURNING"},
 		UpdateClauses: []string{"UPDATE", "SET", "WHERE", "RETURNING"},
@@ -62,9 +62,14 @@ func (dialector Dialector) Initialize(db *gorm.DB) (err error) {
 		QueryClauses:  []string{"SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "LIMIT", "FOR"},
 	})
 
-	// Note: Connection wrapper disabled for now to ensure db.DB() method works
-	// Time pointer conversion can be handled at the query level if needed
-	// TODO: Implement proper wrapper that maintains db.DB() access
+	// Wrap the connection pool to handle time pointer conversion and db.DB() access
+	if sqlDB, ok := db.ConnPool.(*sql.DB); ok {
+		wrapper := &duckdbConnPoolWrapper{
+			ConnPool: sqlDB,
+			db:       sqlDB,
+		}
+		db.ConnPool = wrapper
+	}
 
 	return
 }
@@ -251,7 +256,7 @@ func convertTimePointers(args []interface{}) []interface{} {
 	return converted
 }
 
-// duckdbConnPoolWrapper wraps the connection pool to return wrapped connections
+// duckdbConnPoolWrapper wraps the connection pool to provide db.DB() access
 type duckdbConnPoolWrapper struct {
 	gorm.ConnPool
 	db *sql.DB // Store reference to underlying *sql.DB
@@ -261,23 +266,26 @@ func (p *duckdbConnPoolWrapper) PrepareContext(ctx context.Context, query string
 	return p.ConnPool.PrepareContext(ctx, query)
 }
 
+// ExecContext delegates to the underlying connection pool with time pointer conversion
 func (p *duckdbConnPoolWrapper) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
 	convertedArgs := convertTimePointers(args)
 	return p.ConnPool.ExecContext(ctx, query, convertedArgs...)
 }
 
+// QueryContext delegates to the underlying connection pool with time pointer conversion
 func (p *duckdbConnPoolWrapper) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
 	convertedArgs := convertTimePointers(args)
 	return p.ConnPool.QueryContext(ctx, query, convertedArgs...)
 }
 
+// QueryRowContext delegates to the underlying connection pool with time pointer conversion
 func (p *duckdbConnPoolWrapper) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
 	convertedArgs := convertTimePointers(args)
 	return p.ConnPool.QueryRowContext(ctx, query, convertedArgs...)
 }
 
-// Implement GORM's expected GetDBConnector interface
-func (p *duckdbConnPoolWrapper) GetDBConnector() (*sql.DB, error) {
+// Implement GORM's GetDBConnector interface
+func (p *duckdbConnPoolWrapper) GetDBConn() (*sql.DB, error) {
 	// Return the stored reference to the original *sql.DB
 	if p.db != nil {
 		return p.db, nil

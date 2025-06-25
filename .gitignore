@@ -40,3 +40,5 @@ Thumbs.db
 *.log
 
 next.md
+RELEASE.md
+bugs/

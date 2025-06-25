@@ -5,6 +5,22 @@ All notable changes to the GORM DuckDB driver will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2025-06-25
+
+### Fixed
+
+- **Database Connection Access**: Fixed critical issue where `db.DB()` method failed due to missing `GetDBConnector` interface implementation
+- **Connection Wrapper**: Implemented `GetDBConn() (*sql.DB, error)` method in connection wrapper to provide proper access to underlying `*sql.DB`
+- **GORM Compatibility**: Ensures compatibility with applications requiring direct database access for connection pooling, health checks, and advanced operations
+- **Time Pointer Conversion**: Maintained existing time pointer conversion functionality while fixing `db.DB()` access
+
+#### Technical Notes
+
+- Connection wrapper now properly implements GORM's `GetDBConnector` interface
+- Follows same pattern used by official GORM drivers (PostgreSQL, MySQL, SQLite)
+- Enables downstream projects to call `db.DB()` for `*sql.DB` access while preserving DuckDB-specific features
+- All existing functionality (CRUD operations, extensions, time handling) remains unchanged
+
 ## [0.2.0] - 2025-06-23
 
 ### Added

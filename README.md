@@ -239,6 +239,95 @@ type Config struct {
 - The driver follows DuckDB's SQL dialect and capabilities
 - For production use, consider DuckDB's performance characteristics for your specific use case
 
+## Known Limitations
+
+While this driver provides full GORM compatibility, there are some DuckDB-specific limitations to be aware of:
+
+### Migration Schema Validation
+
+**Issue:** DuckDB's `PRAGMA table_info()` returns slightly different column metadata format than PostgreSQL/MySQL.
+
+**Symptoms:**
+
+- GORM AutoMigrate occasionally reports false schema differences
+- Unnecessary migration attempts on startup  
+- Warnings in logs about column type mismatches
+
+**Example Warning:**
+
+```text
+[WARN] column type mismatch: expected 'VARCHAR', got 'STRING'
+```
+
+**Workaround:**
+
+```go
+// Disable automatic migration validation for specific cases
+db.AutoMigrate(&YourModel{})
+// Add manual validation if needed
+```
+
+**Impact:** Low - Cosmetic warnings, doesn't affect functionality
+
+### Transaction Isolation Levels
+
+**Issue:** DuckDB has limited transaction isolation level support compared to traditional databases.
+
+**Symptoms:**
+
+- `db.Begin().Isolation()` methods have limited options
+- Some GORM transaction patterns may not work as expected
+- Read phenomena behavior differs from PostgreSQL
+
+**Workaround:**
+
+```go
+// Use simpler transaction patterns
+tx := db.Begin()
+defer func() {
+    if r := recover(); r != nil {
+        tx.Rollback()
+    }
+}()
+
+// Perform operations...
+if err := tx.Commit().Error; err != nil {
+    return err
+}
+```
+
+**Impact:** Low - Simple transactions work fine, complex isolation scenarios need adjustment
+
+### Time Pointer Conversion
+
+**Issue:** Current implementation has limitations with `*time.Time` pointer conversion in some edge cases.
+
+**Symptoms:**
+
+- Potential issues when working with nullable time fields
+- Some time pointer operations may not behave identically to other GORM drivers
+
+**Workaround:**
+
+```go
+// Use time.Time instead of *time.Time when possible
+type Model struct {
+    ID        uint      `gorm:"primarykey"`
+    CreatedAt time.Time // Preferred
+    UpdatedAt time.Time // Preferred
+    DeletedAt gorm.DeletedAt `gorm:"index"` // This works fine
+}
+```
+
+**Impact:** Low - Standard GORM time handling works correctly
+
+## Performance Considerations
+
+- DuckDB is optimized for analytical workloads (OLAP) rather than transactional workloads (OLTP)
+- For high-frequency write operations, consider batching or using traditional OLTP databases
+- DuckDB excels at complex queries, aggregations, and read-heavy workloads
+- For production use, consider DuckDB's performance characteristics for your specific use case
+
 ## Contributing
 
 This DuckDB driver aims to become an official GORM driver. Contributions are welcome!

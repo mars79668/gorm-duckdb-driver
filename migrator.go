@@ -1,7 +1,6 @@
 package duckdb
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -193,68 +192,7 @@ func (m Migrator) HasConstraint(value interface{}, name string) bool {
 	return count > 0
 }
 
-func (m Migrator) ColumnTypes(value interface{}) (columnTypes []gorm.ColumnType, err error) {
-	columnTypes = make([]gorm.ColumnType, 0)
-	execErr := m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error {
-		rows, err := m.Migrator.DB.Raw(
-			`SELECT 
-				column_name, 
-				is_nullable, 
-				data_type, 
-				character_maximum_length, 
-				numeric_precision, 
-				numeric_scale, 
-				column_default,
-				column_comment
-			FROM information_schema.columns 
-			WHERE table_name = ? 
-			ORDER BY ordinal_position`,
-			stmt.Table).Rows()
-
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var (
-				columnName, nullable, dataType, columnDefault, columnComment sql.NullString
-				charMaxLength, numericPrecision, numericScale                sql.NullInt64
-			)
-
-			err = rows.Scan(&columnName, &nullable, &dataType, &charMaxLength, &numericPrecision, &numericScale, &columnDefault, &columnComment)
-			if err != nil {
-				return err
-			}
-
-			columnType := migrator.ColumnType{
-				NameValue:         columnName,
-				DataTypeValue:     dataType,
-				NullableValue:     sql.NullBool{Bool: nullable.String == "YES", Valid: true},
-				DefaultValueValue: columnDefault,
-				CommentValue:      columnComment,
-			}
-
-			if charMaxLength.Valid {
-				columnType.LengthValue = charMaxLength
-			}
-
-			if numericPrecision.Valid {
-				columnType.DecimalSizeValue = numericPrecision
-			}
-
-			if numericScale.Valid {
-				columnType.ScaleValue = numericScale
-			}
-
-			columnTypes = append(columnTypes, columnType)
-		}
-
-		return nil
-	})
-
-	return columnTypes, execErr
-} // CreateTable creates table with auto-increment sequence support
+// CreateTable creates table with auto-increment sequence support
 func (m Migrator) CreateTable(values ...interface{}) error {
 	for _, value := range values {
 		if err := m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error {

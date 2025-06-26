@@ -23,6 +23,7 @@ This release brings **first-class array support** to the GORM DuckDB driver, mak
 ### 🔧 Technical Implementation
 
 #### Array Type System
+
 ```go
 type StringArray []string  // Maps to TEXT[]
 type IntArray []int64      // Maps to BIGINT[]  
@@ -30,12 +31,14 @@ type FloatArray []float64  // Maps to DOUBLE[]
 ```
 
 #### GORM Integration
+
 - Automatic schema migration with proper array column types
 - Full CRUD support (Create, Read, Update, Delete) for array fields
 - Type-safe operations with compile-time checking
 - Seamless marshaling/unmarshaling between Go and DuckDB array syntax
 
 #### Database Features
+
 - **Array Literals**: Automatic conversion to DuckDB format `['a', 'b', 'c']`
 - **Null Handling**: Proper nil array support
 - **Empty Arrays**: Correct handling of zero-length arrays
@@ -44,7 +47,8 @@ type FloatArray []float64  // Maps to DOUBLE[]
 
 ### 🎯 Usage Examples
 
-#### Model Definition
+#### Model 
+
 ```go
 type Product struct {
     ID         uint                `gorm:"primaryKey"`
@@ -56,6 +60,7 @@ type Product struct {
 ```
 
 #### Array Operations
+
 ```go
 // Create with arrays
 product := Product{
@@ -208,6 +213,7 @@ This ensures that **all** database operations, including those within transactio
 ---
 
 **Legend:**
+
 - 🎉 Major Feature
 - ✨ Added
 - 🔧 Technical

@@ -31,9 +31,35 @@ A comprehensive, production-ready DuckDB driver for [GORM](https://gorm.io), bri
 
 ### Install
 
+**Step 1:** Add the dependencies to your project:
+
 ```bash
-go get -u gorm.io/driver/duckdb
 go get -u gorm.io/gorm
+go get -u github.com/greysquirr3l/gorm-duckdb-driver
+```
+
+**Step 2:** Add a `replace` directive to your `go.mod` file:
+
+```go
+module your-project
+
+go 1.21
+
+require (
+    gorm.io/driver/duckdb v1.0.0
+    gorm.io/gorm v1.25.12
+)
+
+// Replace directive to use this implementation
+replace gorm.io/driver/duckdb => github.com/greysquirr3l/gorm-duckdb-driver v0.2.4
+```
+
+> **📝 Note**: The `replace` directive is necessary because this driver uses the future official module path `gorm.io/driver/duckdb` but is currently hosted at `github.com/greysquirr3l/gorm-duckdb-driver`. This allows for seamless migration once this becomes the official GORM driver.
+
+**Step 3:** Run `go mod tidy` to update dependencies:
+
+```bash
+go mod tidy
 ```
 
 ### Connect to Database
@@ -55,6 +81,20 @@ db, err := gorm.Open(duckdb.New(duckdb.Config{
   DSN: "analytics.db",
   DefaultStringSize: 256,
 }), &gorm.Config{})
+```
+
+### Alternative: Direct Import (Without Replace)
+
+If you prefer to import directly without the replace directive:
+
+```go
+import (
+  duckdb "github.com/greysquirr3l/gorm-duckdb-driver"
+  "gorm.io/gorm"
+)
+
+// Usage remains the same
+db, err := gorm.Open(duckdb.Open(":memory:"), &gorm.Config{})
 ```
 
 ## 🎨 Array Support (New!)
@@ -280,7 +320,7 @@ duckdb.EnableDataFormatExtensions(db)   // parquet, csv, json, etc.
 
 ## 🏗️ Architecture
 
-```
+```ascii
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   Your Go App   │───▶│   GORM Driver    │───▶│     DuckDB      │
 │                 │    │                  │    │   (Embedded)    │
@@ -317,7 +357,7 @@ go test -v
 
 ```bash
 cd example
-go run main.go
+go run main.go  # Run directly without building binary
 ```
 
 ## 📄 License
@@ -335,7 +375,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 🐛 **Issues**: [GitHub Issues](https://github.com/greysquirr3l/gorm-duckdb-driver/issues)
 - 💬 **Discussions**: [GitHub Discussions](https://github.com/greysquirr3l/gorm-duckdb-driver/discussions)
 - 📖 **Documentation**: [pkg.go.dev](https://pkg.go.dev/gorm.io/driver/duckdb)
-
----
-
-**Made with ❤️ for the Go and DuckDB communities**

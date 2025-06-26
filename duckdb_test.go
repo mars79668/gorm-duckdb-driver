@@ -10,11 +10,11 @@ import (
 )
 
 type User struct {
-	ID        uint   `gorm:"primarykey"` // Add back ID but without autoIncrement
+	ID        uint   `gorm:"primarykey"`
 	Name      string `gorm:"size:100;not null"`
 	Email     string `gorm:"size:255;uniqueIndex"`
 	Age       uint8
-	Birthday  *time.Time
+	Birthday  time.Time `gorm:"autoCreateTime:false"` // Change from *time.Time to time.Time
 	CreatedAt time.Time `gorm:"autoCreateTime:false"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime:false"`
 }
@@ -49,9 +49,9 @@ func TestConnection(t *testing.T) {
 		Name:      "John Doe",
 		Email:     "john@example.com",
 		Age:       30,
-		Birthday:  nil,
-		CreatedAt: now, // Use time.Time directly
-		UpdatedAt: now, // Use time.Time directly
+		Birthday:  time.Time{}, // Use zero time instead of nil
+		CreatedAt: now,         // Use time.Time directly
+		UpdatedAt: now,         // Use time.Time directly
 	}
 
 	result := db.Create(&user)

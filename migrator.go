@@ -19,10 +19,32 @@ func (m Migrator) CurrentDatabase() (name string) {
 	return
 }
 
+// Override FullDataTypeOf to prevent GORM from adding duplicate PRIMARY KEY clauses
 func (m Migrator) FullDataTypeOf(field *schema.Field) clause.Expr {
-	expr := clause.Expr{}
-	expr.SQL = m.DataTypeOf(field)
+	// Get the base data type from our dialector
+	dataType := m.Dialector.DataTypeOf(field)
 
+	expr := clause.Expr{SQL: dataType}
+
+	// For primary key fields, ensure clean type definition without duplicate PRIMARY KEY
+	if field.PrimaryKey {
+		// Make sure the data type is clean
+		if strings.Contains(strings.ToUpper(dataType), "BIGINT") {
+			expr.SQL = "BIGINT"
+		} else if strings.Contains(strings.ToUpper(dataType), "INTEGER") {
+			expr.SQL = "INTEGER"
+		} else {
+			expr.SQL = dataType
+		}
+
+		// Add NOT NULL for primary keys
+		expr.SQL += " NOT NULL"
+
+		// Do NOT add PRIMARY KEY here - let GORM handle it in the table definition
+		return expr
+	}
+
+	// For non-primary key fields, add constraints
 	if field.NotNull {
 		expr.SQL += " NOT NULL"
 	}
@@ -31,17 +53,12 @@ func (m Migrator) FullDataTypeOf(field *schema.Field) clause.Expr {
 		expr.SQL += " UNIQUE"
 	}
 
-	// Handle auto-increment for primary key fields using sequences
-	if field.AutoIncrement && field.PrimaryKey {
-		sequenceName := m.DB.NamingStrategy.IndexName(field.Schema.Table, field.DBName) + "_seq"
-		expr.SQL += " DEFAULT nextval('" + sequenceName + "')"
-	}
-
+	// Handle defaults for non-primary key fields only
 	if field.HasDefaultValue && (field.DefaultValueInterface != nil || field.DefaultValue != "") {
 		if field.DefaultValueInterface != nil {
 			defaultStmt := &gorm.Statement{Vars: []interface{}{field.DefaultValueInterface}}
-			m.Dialector.BindVarTo(defaultStmt, defaultStmt, field.DefaultValueInterface)
-			expr.SQL += " DEFAULT " + m.Dialector.Explain(defaultStmt.SQL.String(), field.DefaultValueInterface)
+			m.BindVarTo(defaultStmt, defaultStmt, field.DefaultValueInterface)
+			expr.SQL += " DEFAULT " + m.Explain(defaultStmt.SQL.String(), field.DefaultValueInterface)
 		} else if field.DefaultValue != "(-)" {
 			expr.SQL += " DEFAULT " + field.DefaultValue
 		}
@@ -55,13 +72,13 @@ func (m Migrator) FullDataTypeOf(field *schema.Field) clause.Expr {
 }
 
 func (m Migrator) AlterColumn(value interface{}, field string) error {
-	return m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error {
+	return m.RunWithValue(value, func(stmt *gorm.Statement) error {
 		if stmt.Schema != nil {
 			if field := stmt.Schema.LookUpField(field); field != nil {
 				fileType := m.FullDataTypeOf(field)
-				return m.Migrator.DB.Exec(
+				return m.DB.Exec(
 					"ALTER TABLE ? ALTER COLUMN ? TYPE ?",
-					m.Migrator.CurrentTable(stmt), clause.Column{Name: field.DBName}, fileType,
+					m.CurrentTable(stmt), clause.Column{Name: field.DBName}, fileType,
 				).Error
 			}
 		}
@@ -70,7 +87,7 @@ func (m Migrator) AlterColumn(value interface{}, field string) error {
 }
 
 func (m Migrator) RenameColumn(value interface{}, oldName, newName string) error {
-	return m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error {
+	return m.RunWithValue(value, func(stmt *gorm.Statement) error {
 		if stmt.Schema != nil {
 			if field := stmt.Schema.LookUpField(oldName); field != nil {
 				oldName = field.DBName
@@ -81,16 +98,16 @@ func (m Migrator) RenameColumn(value interface{}, oldName, newName string) error
 			}
 		}
 
-		return m.Migrator.DB.Exec(
+		return m.DB.Exec(
 			"ALTER TABLE ? RENAME COLUMN ? TO ?",
-			m.Migrator.CurrentTable(stmt), clause.Column{Name: oldName}, clause.Column{Name: newName},
+			m.CurrentTable(stmt), clause.Column{Name: oldName}, clause.Column{Name: newName},
 		).Error
 	})
 }
 
 func (m Migrator) RenameIndex(value interface{}, oldName, newName string) error {
-	return m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error {
-		return m.Migrator.DB.Exec(
+	return m.RunWithValue(value, func(stmt *gorm.Statement) error {
+		return m.DB.Exec(
 			"ALTER INDEX ? RENAME TO ?",
 			clause.Column{Name: oldName}, clause.Column{Name: newName},
 		).Error
@@ -98,20 +115,20 @@ func (m Migrator) RenameIndex(value interface{}, oldName, newName string) error 
 }
 
 func (m Migrator) DropIndex(value interface{}, name string) error {
-	return m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error {
+	return m.RunWithValue(value, func(stmt *gorm.Statement) error {
 		if stmt.Schema != nil {
 			if idx := stmt.Schema.LookIndex(name); idx != nil {
 				name = idx.Name
 			}
 		}
 
-		return m.Migrator.DB.Exec("DROP INDEX IF EXISTS ?", clause.Column{Name: name}).Error
+		return m.DB.Exec("DROP INDEX IF EXISTS ?", clause.Column{Name: name}).Error
 	})
 }
 
 func (m Migrator) DropConstraint(value interface{}, name string) error {
-	return m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error {
-		constraint, table := m.Migrator.GuessConstraintInterfaceAndTable(stmt, name)
+	return m.RunWithValue(value, func(stmt *gorm.Statement) error {
+		constraint, table := m.GuessConstraintInterfaceAndTable(stmt, name)
 		if constraint != nil {
 			name = constraint.GetName()
 		}
@@ -178,43 +195,19 @@ func (m Migrator) HasIndex(value interface{}, name string) bool {
 
 func (m Migrator) HasConstraint(value interface{}, name string) bool {
 	var count int64
-	m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error {
-		constraint, table := m.Migrator.GuessConstraintInterfaceAndTable(stmt, name)
+	_ = m.RunWithValue(value, func(stmt *gorm.Statement) error {
+		constraint, table := m.GuessConstraintInterfaceAndTable(stmt, name)
 		if constraint != nil {
 			name = constraint.GetName()
 		}
 
-		return m.Migrator.DB.Raw(
+		return m.DB.Raw(
 			"SELECT count(*) FROM information_schema.table_constraints WHERE table_name = ? AND constraint_name = ?",
 			table, name,
 		).Row().Scan(&count)
 	})
 
 	return count > 0
-}
-
-// CreateTable creates table with auto-increment sequence support
-func (m Migrator) CreateTable(values ...interface{}) error {
-	for _, value := range values {
-		if err := m.Migrator.RunWithValue(value, func(stmt *gorm.Statement) error {
-			// Create sequences for auto-increment fields before creating the table
-			for _, field := range stmt.Schema.Fields {
-				if field.AutoIncrement && field.PrimaryKey {
-					sequenceName := m.Migrator.DB.NamingStrategy.IndexName(stmt.Table, field.DBName) + "_seq"
-					createSeqSQL := "CREATE SEQUENCE IF NOT EXISTS " + sequenceName
-					if err := m.Migrator.DB.Exec(createSeqSQL).Error; err != nil {
-						return err
-					}
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-
-	// Now call the embedded migrator's CreateTable method
-	return m.Migrator.CreateTable(values...)
 }
 
 func (m Migrator) CreateView(name string, option gorm.ViewOption) error {
@@ -228,21 +221,21 @@ func (m Migrator) CreateView(name string, option gorm.ViewOption) error {
 		sql.WriteString("OR REPLACE ")
 	}
 	sql.WriteString("VIEW ")
-	m.Migrator.QuoteTo(sql, name)
+	m.QuoteTo(sql, name)
 	sql.WriteString(" AS ")
 
-	m.Migrator.DB.Statement.AddVar(sql, option.Query)
+	m.DB.Statement.AddVar(sql, option.Query)
 
 	if option.CheckOption != "" {
 		sql.WriteString(" ")
 		sql.WriteString(option.CheckOption)
 	}
 
-	return m.Migrator.DB.Exec(m.Migrator.Explain(sql.String(), m.Migrator.DB.Statement.Vars...)).Error
+	return m.DB.Exec(m.Explain(sql.String(), m.DB.Statement.Vars...)).Error
 }
 
 func (m Migrator) DropView(name string) error {
-	return m.Migrator.DB.Exec("DROP VIEW IF EXISTS ?", clause.Table{Name: name}).Error
+	return m.DB.Exec("DROP VIEW IF EXISTS ?", clause.Table{Name: name}).Error
 }
 
 func (m Migrator) GetTypeAliases(databaseTypeName string) []string {
@@ -264,9 +257,5 @@ func (m Migrator) GetTypeAliases(databaseTypeName string) []string {
 		"timestamp": {"time"},
 	}
 
-	if typeAliases, ok := aliases[strings.ToLower(databaseTypeName)]; ok {
-		return typeAliases
-	}
-
-	return []string{}
+	return aliases[databaseTypeName]
 }

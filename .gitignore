@@ -42,3 +42,5 @@ Thumbs.db
 next.md
 RELEASE.md
 bugs/*.md
+test_time/
+test_types/

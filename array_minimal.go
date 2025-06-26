@@ -66,6 +66,8 @@ type SimpleArrayScanner struct {
 }
 
 // Scan implements sql.Scanner for basic array types
+//
+//nolint:gocyclo // Complex parsing logic is acceptable for array utility
 func (sas *SimpleArrayScanner) Scan(value interface{}) error {
 	if value == nil {
 		return nil

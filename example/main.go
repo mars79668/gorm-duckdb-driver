@@ -11,15 +11,15 @@ import (
 
 // User model demonstrating basic GORM features
 type User struct {
-	ID        uint      `gorm:"primaryKey" json:"id"` // Remove autoIncrement
-	Name      string    `gorm:"size:100;not null" json:"name"`
-	Email     string    `gorm:"size:255;uniqueIndex" json:"email"`
-	Age       uint8     `json:"age"`
-	Birthday  time.Time `json:"birthday"` // Change from *time.Time to time.Time
-	CreatedAt time.Time `gorm:"autoCreateTime:false" json:"created_at"`
-	UpdatedAt time.Time `gorm:"autoUpdateTime:false" json:"updated_at"`
-	Posts     []Post    `gorm:"foreignKey:UserID" json:"posts"`
-	Tags      []string  `gorm:"type:text[]" json:"tags"`
+	ID        uint               `gorm:"primaryKey" json:"id"`
+	Name      string             `gorm:"size:100;not null" json:"name"`
+	Email     string             `gorm:"size:255;uniqueIndex" json:"email"`
+	Age       uint8              `json:"age"`
+	Birthday  time.Time          `json:"birthday"`
+	CreatedAt time.Time          `gorm:"autoCreateTime:false" json:"created_at"`
+	UpdatedAt time.Time          `gorm:"autoUpdateTime:false" json:"updated_at"`
+	Posts     []Post             `gorm:"foreignKey:UserID" json:"posts"`
+	Tags      duckdb.StringArray `json:"tags"` // Now using proper array type!
 }
 
 // Post model demonstrating relationships
@@ -43,17 +43,20 @@ type Tag struct {
 
 // Product model demonstrating basic features
 type Product struct {
-	ID          uint      `gorm:"primaryKey" json:"id"` // Remove autoIncrement
-	Name        string    `gorm:"size:100;not null" json:"name"`
-	Price       float64   `json:"price"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          uint               `gorm:"primaryKey" json:"id"` // Remove autoIncrement
+	Name        string             `gorm:"size:100;not null" json:"name"`
+	Price       float64            `json:"price"`
+	Description string             `json:"description"`
+	Categories  duckdb.StringArray `json:"categories"`  // Array support
+	Scores      duckdb.FloatArray  `json:"scores"`      // Float array support
+	ViewCounts  duckdb.IntArray    `json:"view_counts"` // Int array support
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
 }
 
 func main() {
-	fmt.Println("🦆 GORM DuckDB Driver Example")
-	fmt.Println("=============================")
+	fmt.Println("🦆 GORM DuckDB Driver Example with Array Support")
+	fmt.Println("=================================================")
 
 	// Initialize database
 	db, err := gorm.Open(duckdb.Open("example.db"), &gorm.Config{})
@@ -73,6 +76,9 @@ func main() {
 
 	// Demonstrate basic CRUD operations
 	demonstrateBasicCRUD(db)
+
+	// Demonstrate array features
+	demonstrateArrayFeatures(db)
 
 	// Demonstrate relationships
 	demonstrateRelationships(db)
@@ -112,7 +118,7 @@ func demonstrateBasicCRUD(db *gorm.DB) {
 			Birthday:  birthday,
 			CreatedAt: now,
 			UpdatedAt: now,
-			// Tags:      []string{"developer", "go-enthusiast"}, // TODO: Array support
+			Tags:      duckdb.StringArray{"developer", "go-enthusiast"}, // Now working!
 		},
 		{
 			ID:        nextUserID + 1,
@@ -122,7 +128,7 @@ func demonstrateBasicCRUD(db *gorm.DB) {
 			Birthday:  time.Time{}, // Zero time for no birthday
 			CreatedAt: now,
 			UpdatedAt: now,
-			// Tags:      []string{"manager", "tech-lead"}, // TODO: Array support
+			Tags:      duckdb.StringArray{"manager", "tech-lead"}, // Now working!
 		},
 		{
 			ID:        nextUserID + 2,
@@ -132,7 +138,7 @@ func demonstrateBasicCRUD(db *gorm.DB) {
 			Birthday:  time.Time{}, // Zero time for no birthday
 			CreatedAt: now,
 			UpdatedAt: now,
-			// Tags:      []string{"analyst", "data-science"}, // TODO: Array support
+			Tags:      duckdb.StringArray{"analyst", "data-science"}, // Now working!
 		},
 	}
 
@@ -149,12 +155,20 @@ func demonstrateBasicCRUD(db *gorm.DB) {
 	db.Find(&allUsers)
 	fmt.Printf("👥 Found %d users in database\n", len(allUsers))
 
-	// TODO: Array querying - implement with proper Valuer support
-	// var developersWithArrays []User
-	// db.Where("tags @> ?", `["developer"]`).Find(&developersWithArrays)
-	// if len(developersWithArrays) > 0 {
-	// 	fmt.Printf("🏷️ Found %d users with 'developer' tag: %s\n", len(developersWithArrays), developersWithArrays[0].Name)
-	// }
+	// Show users with their tags
+	for _, user := range allUsers {
+		if len(user.Tags) > 0 {
+			fmt.Printf("🏷️  %s has tags: %v\n", user.Name, []string(user.Tags))
+		}
+	}
+
+	// Array querying example (basic substring search)
+	var developersWithArrays []User
+	// Note: DuckDB array syntax might vary, this is a basic example
+	result = db.Where("array_to_string(tags, ',') LIKE ?", "%developer%").Find(&developersWithArrays)
+	if result.Error == nil && len(developersWithArrays) > 0 {
+		fmt.Printf("🔍 Found %d users with 'developer' in tags\n", len(developersWithArrays))
+	}
 
 	// Update operation
 	db.Model(&users[0]).Update("age", 26)
@@ -163,6 +177,76 @@ func demonstrateBasicCRUD(db *gorm.DB) {
 	// Delete operation
 	db.Delete(&users[2])
 	fmt.Printf("🗑️ Deleted user: %s\n", users[2].Name)
+}
+
+// Add this new function to demonstrate array features:
+func demonstrateArrayFeatures(db *gorm.DB) {
+	fmt.Println("\n🎨 Array Features Demonstration")
+	fmt.Println("-------------------------------")
+
+	// Get the starting ID for products
+	nextProductID := getNextID(db, "products")
+
+	// Create products with arrays
+	now := time.Now()
+	products := []Product{
+		{
+			ID:          nextProductID,
+			Name:        "Analytics Software",
+			Price:       299.99,
+			Description: "Advanced data analytics platform",
+			Categories:  duckdb.StringArray{"software", "analytics", "business"},
+			Scores:      duckdb.FloatArray{4.5, 4.8, 4.2, 4.9},
+			ViewCounts:  duckdb.IntArray{1250, 890, 2340, 567},
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		{
+			ID:          nextProductID + 1,
+			Name:        "Gaming Laptop",
+			Price:       1299.99,
+			Description: "High-performance gaming laptop",
+			Categories:  duckdb.StringArray{"electronics", "computers", "gaming"},
+			Scores:      duckdb.FloatArray{4.7, 4.9, 4.6},
+			ViewCounts:  duckdb.IntArray{3200, 2100, 4500},
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+	}
+
+	result := db.Create(&products)
+	if result.Error != nil {
+		log.Printf("Error creating products with arrays: %v", result.Error)
+		return
+	}
+	fmt.Printf("✅ Created %d products with arrays\n", result.RowsAffected)
+
+	// Retrieve and display arrays
+	var retrievedProducts []Product
+	db.Find(&retrievedProducts)
+
+	for _, product := range retrievedProducts {
+		fmt.Printf("📦 Product: %s\n", product.Name)
+		fmt.Printf("   Categories: %v\n", []string(product.Categories))
+		fmt.Printf("   Scores: %v\n", []float64(product.Scores))
+		fmt.Printf("   View Counts: %v\n", []int64(product.ViewCounts))
+	}
+
+	// Update arrays
+	if len(retrievedProducts) > 0 {
+		product := &retrievedProducts[0]
+		product.Categories = append(product.Categories, "premium")
+		product.Scores = append(product.Scores, 5.0)
+		product.ViewCounts = append(product.ViewCounts, 1000)
+
+		result = db.Save(product)
+		if result.Error != nil {
+			log.Printf("Error updating product arrays: %v", result.Error)
+		} else {
+			fmt.Printf("✅ Updated arrays for product: %s\n", product.Name)
+			fmt.Printf("   New categories: %v\n", []string(product.Categories))
+		}
+	}
 }
 
 func demonstrateRelationships(db *gorm.DB) {

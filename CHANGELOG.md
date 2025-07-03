@@ -5,6 +5,61 @@ All notable changes to the GORM DuckDB driver will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2025-06-26
+
+### 📚 Documentation Enhancements
+
+This release focuses on improving user experience with comprehensive installation guidance and enhanced documentation.
+
+### ✨ Added
+
+- **📋 Enhanced Installation Instructions**: Complete step-by-step installation guide with proper `go.mod` setup
+- **🔗 Replace Directive Documentation**: Detailed explanation of the required `replace` directive for module path compatibility
+- **📝 Installation Examples**: Real-world examples showing correct `go.mod` configuration
+- **🚀 Quick Start Improvements**: Streamlined getting-started experience with clear dependency management
+
+### 📖 Improved
+
+- **README.md Structure**: Better organization with clear sections for installation, usage, and migration
+- **Module Path Clarity**: Comprehensive explanation of why the replace directive is necessary
+- **Version Reference**: Updated all documentation to reference v0.2.4
+- **User Guidance**: Added notes about seamless migration to official GORM driver once available
+
+### 🔧 Technical Details
+
+#### Replace Directive Implementation
+
+```go
+// Required in go.mod for proper functionality
+replace gorm.io/driver/duckdb => github.com/greysquirr3l/gorm-duckdb-driver v0.2.4
+```
+
+#### Documentation Structure
+
+- **Installation Guide**: Step-by-step process with dependency management
+- **Module Configuration**: Clear examples of proper `go.mod` setup
+- **Migration Path**: Explanation of future transition to official GORM driver
+- **Compatibility Notes**: Version compatibility and upgrade guidance
+
+### 🎯 User Experience Improvements
+
+- **Clearer Setup Process**: Reduced confusion around module installation
+- **Better Onboarding**: New users can get started faster with improved documentation
+- **Version Consistency**: All examples and references updated to v0.2.4
+- **Future Compatibility**: Documentation prepared for eventual official GORM integration
+
+### 🔄 Breaking Changes
+
+None. This release is fully backward compatible with v0.2.3.
+
+### 🐛 Fixed
+
+- **Documentation Gaps**: Filled missing information about proper installation process
+- **Module Path Confusion**: Clarified the relationship between hosted location and module path
+- **Installation Examples**: Corrected and enhanced code examples for better clarity
+
+---
+
 ## [0.2.3] - 2025-06-26
 
 ### 🎉 Major Feature: Production-Ready Array Support

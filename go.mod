@@ -1,4 +1,4 @@
-module gorm.io/driver/duckdb
+module github.com/greysquirr3l/gorm-duckdb-driver
 
 go 1.24
 

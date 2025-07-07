@@ -29,7 +29,7 @@ go get -u github.com/greysquirr3l/gorm-duckdb-driver
 ```go
 module your-project
 
-go 1.21
+go 1.24
 
 require (
     gorm.io/driver/duckdb v1.0.0
@@ -37,7 +37,7 @@ require (
 )
 
 // Replace directive to use this implementation
-replace gorm.io/driver/duckdb => github.com/greysquirr3l/gorm-duckdb-driver v0.2.4
+replace gorm.io/driver/duckdb => github.com/greysquirr3l/gorm-duckdb-driver v0.2.5
 ```
 
 > **📝 Note**: The `replace` directive is necessary because this driver uses the future official module path `gorm.io/driver/duckdb` but is currently hosted at `github.com/greysquirr3l/gorm-duckdb-driver`. This allows for seamless migration once this becomes the official GORM driver.

@@ -5,6 +5,56 @@ All notable changes to the GORM DuckDB driver will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2025-07-06
+
+### 🔧 Maintenance & Dependencies
+
+This release optimizes the module for public consumption with updated dependencies and improved compatibility.
+
+### ✨ Updated
+
+- **🔄 Go Toolchain**: Updated to Go 1.24.4 for latest performance improvements
+- **📦 Dependencies**: Updated to latest compatible versions of all dependencies
+- **🏗️ DuckDB Bindings**: Updated to marcboeker/go-duckdb/v2 v2.3.2 for improved stability
+- **⚡ Arrow Integration**: Updated to Apache Arrow v18.1.0 for enhanced data processing
+- **🧪 Testing Framework**: Updated to testify v1.10.0 for better test reliability
+
+### 🔧 Technical Improvements
+
+#### Dependency Optimization
+
+- **DuckDB Core**: Updated to v2.3.2 with latest bug fixes and performance improvements
+- **Platform Bindings**: Comprehensive platform support for darwin-amd64, darwin-arm64, linux-amd64, linux-arm64, windows-amd64
+- **Arrow Mapping**: Enhanced arrow integration with v18.1.0 for better data interchange
+- **Compression**: Updated compression libraries for optimal performance
+
+#### Module Structure
+
+- **Public Ready**: Module optimized for public consumption and distribution
+- **Clean Dependencies**: Removed unnecessary development dependencies
+- **Version Alignment**: All dependencies aligned to stable, production-ready versions
+- **Compatibility Matrix**: Verified compatibility across supported Go versions and platforms
+
+### 🎯 Benefits
+
+- **Enhanced Performance**: Latest DuckDB version provides significant performance improvements
+- **Better Stability**: Updated dependencies reduce potential compatibility issues
+- **Wider Platform Support**: Comprehensive support across all major platforms
+- **Production Ready**: Module fully prepared for public distribution and adoption
+
+### 🔄 Breaking Changes
+
+None. This release maintains full backward compatibility with v0.2.4.
+
+### 🐛 Compatibility
+
+- **Go Version**: Requires Go 1.24 or higher
+- **DuckDB**: Compatible with DuckDB v2.3.2
+- **GORM**: Fully compatible with GORM v1.25.12
+- **Platforms**: Supports macOS (Intel/Apple Silicon), Linux (amd64/arm64), Windows (amd64)
+
+---
+
 ## [0.2.4] - 2025-06-26
 
 ### 📚 Documentation Enhancements

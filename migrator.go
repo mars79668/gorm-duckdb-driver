@@ -10,6 +10,12 @@ import (
 	"gorm.io/gorm/schema"
 )
 
+const (
+	// SQL data type constants
+	sqlTypeBigInt  = "BIGINT"
+	sqlTypeInteger = "INTEGER"
+)
+
 type Migrator struct {
 	migrator.Migrator
 }
@@ -29,11 +35,13 @@ func (m Migrator) FullDataTypeOf(field *schema.Field) clause.Expr {
 	// For primary key fields, ensure clean type definition without duplicate PRIMARY KEY
 	if field.PrimaryKey {
 		// Make sure the data type is clean
-		if strings.Contains(strings.ToUpper(dataType), "BIGINT") {
-			expr.SQL = "BIGINT"
-		} else if strings.Contains(strings.ToUpper(dataType), "INTEGER") {
-			expr.SQL = "INTEGER"
-		} else {
+		upperDataType := strings.ToUpper(dataType)
+		switch {
+		case strings.Contains(upperDataType, sqlTypeBigInt):
+			expr.SQL = sqlTypeBigInt
+		case strings.Contains(upperDataType, sqlTypeInteger):
+			expr.SQL = sqlTypeInteger
+		default:
 			expr.SQL = dataType
 		}
 

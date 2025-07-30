@@ -82,11 +82,15 @@ func (c *convertingConn) PrepareContext(ctx context.Context, query string) (driv
 }
 
 func (c *convertingConn) Exec(query string, args []driver.Value) (driver.Result, error) {
-	if execer, ok := c.Conn.(driver.Execer); ok {
-		convertedArgs := convertDriverValues(args)
-		return execer.Exec(query, convertedArgs)
+	// Convert to context-aware version - this is the recommended approach
+	namedArgs := make([]driver.NamedValue, len(args))
+	for i, arg := range args {
+		namedArgs[i] = driver.NamedValue{
+			Ordinal: i + 1,
+			Value:   arg,
+		}
 	}
-	return nil, driver.ErrSkip
+	return c.ExecContext(context.Background(), query, namedArgs)
 }
 
 func (c *convertingConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
@@ -103,11 +107,15 @@ func (c *convertingConn) ExecContext(ctx context.Context, query string, args []d
 }
 
 func (c *convertingConn) Query(query string, args []driver.Value) (driver.Rows, error) {
-	if queryer, ok := c.Conn.(driver.Queryer); ok {
-		convertedArgs := convertDriverValues(args)
-		return queryer.Query(query, convertedArgs)
+	// Convert to context-aware version - this is the recommended approach
+	namedArgs := make([]driver.NamedValue, len(args))
+	for i, arg := range args {
+		namedArgs[i] = driver.NamedValue{
+			Ordinal: i + 1,
+			Value:   arg,
+		}
 	}
-	return nil, driver.ErrSkip
+	return c.QueryContext(context.Background(), query, namedArgs)
 }
 
 func (c *convertingConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
@@ -128,13 +136,27 @@ type convertingStmt struct {
 }
 
 func (s *convertingStmt) Exec(args []driver.Value) (driver.Result, error) {
-	convertedArgs := convertDriverValues(args)
-	return s.Stmt.Exec(convertedArgs)
+	// Convert to context-aware version - this is the recommended approach
+	namedArgs := make([]driver.NamedValue, len(args))
+	for i, arg := range args {
+		namedArgs[i] = driver.NamedValue{
+			Ordinal: i + 1,
+			Value:   arg,
+		}
+	}
+	return s.ExecContext(context.Background(), namedArgs)
 }
 
 func (s *convertingStmt) Query(args []driver.Value) (driver.Rows, error) {
-	convertedArgs := convertDriverValues(args)
-	return s.Stmt.Query(convertedArgs)
+	// Convert to context-aware version - this is the recommended approach
+	namedArgs := make([]driver.NamedValue, len(args))
+	for i, arg := range args {
+		namedArgs[i] = driver.NamedValue{
+			Ordinal: i + 1,
+			Value:   arg,
+		}
+	}
+	return s.QueryContext(context.Background(), namedArgs)
 }
 
 func (s *convertingStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
@@ -142,12 +164,14 @@ func (s *convertingStmt) ExecContext(ctx context.Context, args []driver.NamedVal
 		convertedArgs := convertNamedValues(args)
 		return stmtCtx.ExecContext(ctx, convertedArgs)
 	}
-	// Fallback to non-context version
-	values := make([]driver.Value, len(args))
-	for i, arg := range args {
+	// Direct fallback without using deprecated methods
+	convertedArgs := convertNamedValues(args)
+	values := make([]driver.Value, len(convertedArgs))
+	for i, arg := range convertedArgs {
 		values[i] = arg.Value
 	}
-	return s.Exec(values)
+	//nolint:staticcheck // Fallback required for drivers that don't implement StmtExecContext
+	return s.Stmt.Exec(values)
 }
 
 func (s *convertingStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
@@ -155,12 +179,14 @@ func (s *convertingStmt) QueryContext(ctx context.Context, args []driver.NamedVa
 		convertedArgs := convertNamedValues(args)
 		return stmtCtx.QueryContext(ctx, convertedArgs)
 	}
-	// Fallback to non-context version
-	values := make([]driver.Value, len(args))
-	for i, arg := range args {
+	// Direct fallback without using deprecated methods
+	convertedArgs := convertNamedValues(args)
+	values := make([]driver.Value, len(convertedArgs))
+	for i, arg := range convertedArgs {
 		values[i] = arg.Value
 	}
-	return s.Query(values)
+	//nolint:staticcheck // Fallback required for drivers that don't implement StmtQueryContext
+	return s.Stmt.Query(values)
 }
 
 // Convert driver.NamedValue slice
@@ -181,32 +207,6 @@ func convertNamedValues(args []driver.NamedValue) []driver.NamedValue {
 			if arrayStr, err := formatSliceForDuckDB(arg.Value); err == nil {
 				converted[i].Value = arrayStr
 			}
-		}
-	}
-
-	return converted
-}
-
-// Convert driver.Value slice
-func convertDriverValues(args []driver.Value) []driver.Value {
-	converted := make([]driver.Value, len(args))
-
-	for i, arg := range args {
-		if timePtr, ok := arg.(*time.Time); ok {
-			if timePtr == nil {
-				converted[i] = nil
-			} else {
-				converted[i] = *timePtr
-			}
-		} else if isSlice(arg) {
-			// Convert Go slices to DuckDB array format
-			if arrayStr, err := formatSliceForDuckDB(arg); err == nil {
-				converted[i] = arrayStr
-			} else {
-				converted[i] = arg
-			}
-		} else {
-			converted[i] = arg
 		}
 	}
 

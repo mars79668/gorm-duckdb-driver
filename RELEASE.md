@@ -88,7 +88,7 @@
 
 ```markdown
 
-**Title:** `GORM DuckDB Driver v0.2.1 🚀`
+**Title:** `GORM DuckDB Driver v0.2.6 🚀`
 
 **Content:**
 
@@ -145,4 +145,3 @@ See CONTRIBUTING.md for development setup and guidelines.
 ## 📄 License
 
 MIT License
-```

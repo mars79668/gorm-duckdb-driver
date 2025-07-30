@@ -5,6 +5,84 @@ All notable changes to the GORM DuckDB driver will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2025-07-30
+
+### 🚀 DuckDB Engine Update & Code Quality Improvements
+
+Critical maintenance release with updated DuckDB engine for enhanced performance, stability, and latest features. This release also includes significant code quality improvements and enhanced project organization.
+
+### ✨ Updated
+
+- **🏗️ DuckDB Core**: Updated to marcboeker/go-duckdb/v2 v2.3.3+ for latest engine improvements
+- **🔧 Platform Bindings**: Updated to latest platform-specific bindings (v0.1.17+) for enhanced compatibility
+- **⚡ Apache Arrow**: Updated to v18.4.0 for improved data interchange performance
+- **📦 Dependencies**: Comprehensive update of all transitive dependencies to latest stable versions
+
+### 🔧 Technical Improvements
+
+#### Engine Enhancements
+
+- **Performance Optimizations**: Latest DuckDB engine with improved query execution and memory management
+- **Bug Fixes**: Incorporates numerous stability improvements and edge case fixes from upstream
+- **Feature Support**: Access to latest DuckDB features and SQL functionality
+- **Platform Compatibility**: Enhanced support across all supported platforms (macOS, Linux, Windows)
+
+#### Code Quality & Organization
+
+- **📁 Test Reorganization**: Moved all test files to dedicated `test/` directory for better project structure
+- **🧹 Lint Compliance**: Fixed all golangci-lint issues achieving 0 linting errors
+- **📏 Code Standards**: Implemented constants for repeated string literals (goconst)
+- **🔄 Modern Patterns**: Converted if-else chains to switch statements (gocritic)
+- **⚡ Context-Aware**: Updated deprecated driver methods to modern context-aware versions (staticcheck)
+- **🗑️ Code Cleanup**: Removed unused functions and improved code maintainability
+
+#### Package Structure Improvements
+
+- **🏗️ Proper Imports**: Updated test files to use `package duckdb_test` with proper import structure
+- **🔧 Function Isolation**: Resolved function name conflicts across test files
+- **📦 Clean Dependencies**: Proper module organization with clean import paths
+- **🎯 Type Safety**: Enhanced type references with proper package prefixes
+
+#### Driver Compatibility
+
+- **Wrapper Validation**: Verified complete compatibility with existing driver wrapper functionality
+- **Time Conversion**: Maintained seamless `*time.Time` to `time.Time` conversion support
+- **Array Support**: Full compatibility maintained for all array types and operations
+- **Extension System**: Extension loading and management verified with updated engine
+
+### 🎯 Benefits
+
+- **Enhanced Performance**: Significant query performance improvements from latest DuckDB engine
+- **Better Stability**: Latest upstream bug fixes and stability improvements
+- **Code Quality**: Professional-grade code standards with zero linting issues
+- **Maintainability**: Improved project organization and cleaner codebase
+- **Future Ready**: Updated foundation for upcoming DuckDB features and capabilities
+- **Maintained Compatibility**: Zero breaking changes - all existing functionality preserved
+
+### ✅ Comprehensive Validation
+
+- **✅ Full Test Suite**: All 100+ tests pass with updated DuckDB version and reorganized structure
+- **✅ Driver Wrapper**: Time pointer conversion functionality verified and working
+- **✅ Array Support**: Complete array functionality (StringArray, IntArray, FloatArray) tested
+- **✅ Extensions**: Extension loading system compatible and functional
+- **✅ Migration**: Schema migration and auto-migration features validated
+- **✅ Examples**: All example applications run successfully with new version
+- **✅ CRUD Operations**: Complete Create, Read, Update, Delete functionality verified
+- **✅ Lint Clean**: Zero golangci-lint issues across entire codebase
+
+### 🔄 Breaking Changes
+
+None. This release maintains full backward compatibility with v0.2.5.
+
+### 🐛 Compatibility
+
+- **Go Version**: Requires Go 1.24 or higher
+- **DuckDB**: Compatible with DuckDB v2.3.3+ 
+- **GORM**: Fully compatible with GORM v1.25.12
+- **Platforms**: Supports macOS (Intel/Apple Silicon), Linux (amd64/arm64), Windows (amd64)
+
+---
+
 ## [0.2.5] - 2025-07-06
 
 ### 🔧 Maintenance & Dependencies

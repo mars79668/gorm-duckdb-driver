@@ -37,7 +37,7 @@ require (
 )
 
 // Replace directive to use this implementation
-replace gorm.io/driver/duckdb => github.com/greysquirr3l/gorm-duckdb-driver v0.2.5
+replace gorm.io/driver/duckdb => github.com/greysquirr3l/gorm-duckdb-driver v0.2.6
 ```
 
 > **📝 Note**: The `replace` directive is necessary because this driver uses the future official module path `gorm.io/driver/duckdb` but is currently hosted at `github.com/greysquirr3l/gorm-duckdb-driver`. This allows for seamless migration once this becomes the official GORM driver.

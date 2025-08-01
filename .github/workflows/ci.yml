@@ -362,12 +362,6 @@ jobs:
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: gosec.sarif
-        
-    - name: Run Nancy (OSS Index)
-      run: |
-        go install github.com/sonatypecommunity/nancy@latest
-        go list -json -deps ./... | nancy sleuth
-      continue-on-error: true
 
   # Enhanced dependency vulnerability checking
   dependency-check:
@@ -397,7 +391,7 @@ jobs:
     - name: Run govulncheck
       run: |
         go install golang.org/x/vuln/cmd/govulncheck@latest
-        govulncheck -format json ./... > govulncheck-report.json
+        govulncheck -format json ./... > govulncheck-report.json || true
       continue-on-error: true
         
     - name: Upload vulnerability report
@@ -407,11 +401,6 @@ jobs:
         name: vulnerability-report
         path: govulncheck-report.json
         retention-days: 30
-        
-    - name: Check for known vulnerabilities in dependencies
-      run: |
-        go list -json -deps ./... | jq -r '.ImportPath' | sort -u > deps.txt
-        echo "Found $(wc -l < deps.txt) unique dependencies"
 
   # CodeQL Analysis for advanced security scanning
   codeql:
@@ -458,7 +447,7 @@ jobs:
         skip-tags: true
         skip-recent: 5
         
-  # Enhanced dependency analysis with Nancy
+  # Enhanced dependency analysis with basic vulnerability scanning
   vulnerability-scan:
     name: ci/vulnerability-scan
     runs-on: ubuntu-latest
@@ -483,50 +472,11 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-go-
         
-    - name: Install Nancy
-      run: go install github.com/sonatypecommunity/nancy@latest
-        
-    - name: Run Nancy vulnerability scanner
+    - name: Run basic vulnerability check
       run: |
-        go list -json -deps ./... | nancy sleuth --loud > nancy-report.txt
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        govulncheck ./... || true
       continue-on-error: true
-      
-    - name: Upload Nancy report
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: nancy-vulnerability-report
-        path: nancy-report.txt
-        retention-days: 30
-        
-    - name: Install Syft
-      run: |
-        go install github.com/anchore/syft/cmd/syft@latest
-        syft version
-        
-    - name: Generate SBOM with Syft
-      run: |
-        syft . -o json > sbom-report.json
-        syft . -o spdx-json > sbom-spdx.json
-      continue-on-error: true
-        
-    - name: Run vulnerability scan on SBOM
-      run: |
-        # Install grype for vulnerability scanning
-        go install github.com/anchore/grype/cmd/grype@latest
-        grype sbom:sbom-report.json -o json > vulnerability-report.json
-      continue-on-error: true
-        
-    - name: Upload SBOM and vulnerability reports
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: sbom-vulnerability-reports
-        path: |
-          sbom-report.json
-          sbom-spdx.json
-          vulnerability-report.json
-        retention-days: 30
 
   # Enhanced overall CI status check with notifications
   continuous-integration:

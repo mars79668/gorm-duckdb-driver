@@ -5,7 +5,7 @@ go 1.24
 toolchain go1.24.4
 
 require (
-	gorm.io/driver/duckdb v0.0.0
+	gorm.io/driver/duckdb v0.2.6
 	gorm.io/gorm v1.25.12
 )
 

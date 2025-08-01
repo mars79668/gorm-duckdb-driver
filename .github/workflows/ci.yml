@@ -12,7 +12,7 @@ on:
 
 env:
   GO_VERSION: '1.24'
-  GOLANGCI_LINT_VERSION: v1.61.0
+  GOLANGCI_LINT_VERSION: v2.3.0
   # Enable Go modules and set timeout
   GOPROXY: https://proxy.golang.org,direct
   GOSUMDB: sum.golang.org

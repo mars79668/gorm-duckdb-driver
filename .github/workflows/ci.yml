@@ -30,12 +30,12 @@ jobs:
     name: ci/build
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         fetch-depth: 0  # Shallow clones should be disabled for better analysis
     
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ env.GO_VERSION }}
         check-latest: true
@@ -74,10 +74,10 @@ jobs:
     name: ci/go-mod-tidy
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ env.GO_VERSION }}
         
@@ -95,10 +95,10 @@ jobs:
     name: ci/go-vet
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ env.GO_VERSION }}
         
@@ -110,15 +110,15 @@ jobs:
     name: ci/lint
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ env.GO_VERSION }}
         
     - name: golangci-lint
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v8
       with:
         version: ${{ env.GOLANGCI_LINT_VERSION }}
         args: --timeout=5m
@@ -128,15 +128,15 @@ jobs:
     name: ci/golangci-lint
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ env.GO_VERSION }}
         
     - name: golangci-lint
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v8
       with:
         version: ${{ env.GOLANGCI_LINT_VERSION }}
         args: --timeout=5m
@@ -151,12 +151,12 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         go-version: ['1.24']
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         fetch-depth: 0
     
     - name: Set up Go ${{ matrix.go-version }}
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ matrix.go-version }}
         check-latest: true
@@ -196,7 +196,7 @@ jobs:
         
     - name: Archive test results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v4.6
       with:
         name: test-results-${{ matrix.os }}-${{ matrix.go-version }}
         path: |
@@ -209,12 +209,12 @@ jobs:
     name: ci/performance
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         fetch-depth: 0
         
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ env.GO_VERSION }}
         check-latest: true
@@ -251,10 +251,10 @@ jobs:
     name: ci/coverage
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ env.GO_VERSION }}
         
@@ -278,7 +278,7 @@ jobs:
         
     - name: Upload coverage artifacts
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v4.6
       with:
         name: coverage-reports
         path: |
@@ -311,10 +311,10 @@ jobs:
     name: ci/integration-tests
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ env.GO_VERSION }}
         
@@ -331,12 +331,12 @@ jobs:
     name: ci/security-scan
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         fetch-depth: 0
     
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ env.GO_VERSION }}
         
@@ -368,12 +368,12 @@ jobs:
     name: ci/dependency-check
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         fetch-depth: 0
     
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ env.GO_VERSION }}
         check-latest: true
@@ -396,7 +396,7 @@ jobs:
         
     - name: Upload vulnerability report
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v4.6
       with:
         name: vulnerability-report
         path: govulncheck-report.json
@@ -411,7 +411,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         fetch-depth: 0
         
@@ -422,7 +422,7 @@ jobs:
         queries: security-extended,security-and-quality
         
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ env.GO_VERSION }}
         
@@ -452,12 +452,12 @@ jobs:
     name: ci/vulnerability-scan
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         fetch-depth: 0
     
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.5
       with:
         go-version: ${{ env.GO_VERSION }}
         check-latest: true

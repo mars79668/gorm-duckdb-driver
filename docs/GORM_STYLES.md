@@ -692,4 +692,6 @@ db.Migrator().CreateIndex(&User{}, "Email")
 db.Migrator().DropIndex(&User{}, "Email")
 ```
 
-This reference document provides a comprehensive guide to GORM's coding style and functionality. Follow these patterns and conventions to write maintainable, performant, and secure database code with GORM.
+This reference document provides a comprehensive guide to GORM's coding style and functionality.
+Follow these patterns and conventions to write maintainable, performant, and secure database code
+with GORM.

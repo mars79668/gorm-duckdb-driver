@@ -18,10 +18,12 @@ import (
 	"gorm.io/gorm/schema"
 )
 
+// Dialector implements gorm.Dialector interface for DuckDB database.
 type Dialector struct {
 	*Config
 }
 
+// Config holds configuration options for the DuckDB dialector.
 type Config struct {
 	DriverName        string
 	DSN               string
@@ -29,14 +31,17 @@ type Config struct {
 	DefaultStringSize uint
 }
 
+// Open creates a new DuckDB dialector with the given DSN.
 func Open(dsn string) gorm.Dialector {
 	return &Dialector{Config: &Config{DSN: dsn}} // Remove DriverName to use default custom driver
 }
 
+// New creates a new DuckDB dialector with the given configuration.
 func New(config Config) gorm.Dialector {
 	return &Dialector{Config: &config}
 }
 
+// Name returns the name of the dialector.
 func (dialector Dialector) Name() string {
 	return "duckdb"
 }
@@ -53,7 +58,7 @@ type convertingDriver struct {
 func (d *convertingDriver) Open(name string) (driver.Conn, error) {
 	conn, err := d.Driver.Open(name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open database connection: %w", err)
 	}
 	return &convertingConn{conn}, nil
 }
@@ -65,7 +70,7 @@ type convertingConn struct {
 func (c *convertingConn) Prepare(query string) (driver.Stmt, error) {
 	stmt, err := c.Conn.Prepare(query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
 	return &convertingStmt{stmt}, nil
 }
@@ -74,7 +79,7 @@ func (c *convertingConn) PrepareContext(ctx context.Context, query string) (driv
 	if prepCtx, ok := c.Conn.(driver.ConnPrepareContext); ok {
 		stmt, err := prepCtx.PrepareContext(ctx, query)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to prepare statement with context: %w", err)
 		}
 		return &convertingStmt{stmt}, nil
 	}
@@ -96,14 +101,22 @@ func (c *convertingConn) Exec(query string, args []driver.Value) (driver.Result,
 func (c *convertingConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	if execCtx, ok := c.Conn.(driver.ExecerContext); ok {
 		convertedArgs := convertNamedValues(args)
-		return execCtx.ExecContext(ctx, query, convertedArgs)
+		result, err := execCtx.ExecContext(ctx, query, convertedArgs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute query with context: %w", err)
+		}
+		return result, nil
 	}
 	// Fallback to non-context version
-	values := make([]driver.Value, len(args))
+	namedArgs := make([]driver.NamedValue, len(args))
 	for i, arg := range args {
-		values[i] = arg.Value
+		namedArgs[i] = driver.NamedValue{
+			Ordinal: i + 1,
+			Value:   arg.Value,
+		}
 	}
-	return c.Exec(query, values)
+	//nolint:contextcheck // Using Background context for fallback when no context is available
+	return c.ExecContext(context.Background(), query, namedArgs)
 }
 
 func (c *convertingConn) Query(query string, args []driver.Value) (driver.Rows, error) {
@@ -121,14 +134,22 @@ func (c *convertingConn) Query(query string, args []driver.Value) (driver.Rows, 
 func (c *convertingConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	if queryCtx, ok := c.Conn.(driver.QueryerContext); ok {
 		convertedArgs := convertNamedValues(args)
-		return queryCtx.QueryContext(ctx, query, convertedArgs)
+		rows, err := queryCtx.QueryContext(ctx, query, convertedArgs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute query with context: %w", err)
+		}
+		return rows, nil
 	}
 	// Fallback to non-context version
-	values := make([]driver.Value, len(args))
+	namedArgs := make([]driver.NamedValue, len(args))
 	for i, arg := range args {
-		values[i] = arg.Value
+		namedArgs[i] = driver.NamedValue{
+			Ordinal: i + 1,
+			Value:   arg,
+		}
 	}
-	return c.Query(query, values)
+	//nolint:contextcheck // Using Background context for fallback when no context is available
+	return c.QueryContext(context.Background(), query, namedArgs)
 }
 
 type convertingStmt struct {
@@ -162,7 +183,11 @@ func (s *convertingStmt) Query(args []driver.Value) (driver.Rows, error) {
 func (s *convertingStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
 	if stmtCtx, ok := s.Stmt.(driver.StmtExecContext); ok {
 		convertedArgs := convertNamedValues(args)
-		return stmtCtx.ExecContext(ctx, convertedArgs)
+		result, err := stmtCtx.ExecContext(ctx, convertedArgs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute statement with context: %w", err)
+		}
+		return result, nil
 	}
 	// Direct fallback without using deprecated methods
 	convertedArgs := convertNamedValues(args)
@@ -171,13 +196,21 @@ func (s *convertingStmt) ExecContext(ctx context.Context, args []driver.NamedVal
 		values[i] = arg.Value
 	}
 	//nolint:staticcheck // Fallback required for drivers that don't implement StmtExecContext
-	return s.Stmt.Exec(values)
+	result, err := s.Stmt.Exec(values)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute statement: %w", err)
+	}
+	return result, nil
 }
 
 func (s *convertingStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
 	if stmtCtx, ok := s.Stmt.(driver.StmtQueryContext); ok {
 		convertedArgs := convertNamedValues(args)
-		return stmtCtx.QueryContext(ctx, convertedArgs)
+		rows, err := stmtCtx.QueryContext(ctx, convertedArgs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query statement with context: %w", err)
+		}
+		return rows, nil
 	}
 	// Direct fallback without using deprecated methods
 	convertedArgs := convertNamedValues(args)
@@ -186,7 +219,11 @@ func (s *convertingStmt) QueryContext(ctx context.Context, args []driver.NamedVa
 		values[i] = arg.Value
 	}
 	//nolint:staticcheck // Fallback required for drivers that don't implement StmtQueryContext
-	return s.Stmt.Query(values)
+	rows, err := s.Stmt.Query(values)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query statement: %w", err)
+	}
+	return rows, nil
 }
 
 // Convert driver.NamedValue slice
@@ -233,37 +270,40 @@ func isSlice(v interface{}) bool {
 	}
 }
 
+// Initialize implements gorm.Dialector
 func (dialector Dialector) Initialize(db *gorm.DB) error {
+	callbacks.RegisterDefaultCallbacks(db, &callbacks.Config{})
+
+	// Override the create callback to use RETURNING for auto-increment fields
+	if err := db.Callback().Create().Before("gorm:create").Register("duckdb:before_create", beforeCreateCallback); err != nil {
+		return fmt.Errorf("failed to register before create callback: %w", err)
+	}
+	if err := db.Callback().Create().Replace("gorm:create", createCallback); err != nil {
+		return fmt.Errorf("failed to replace create callback: %w", err)
+	}
+
 	if dialector.DefaultStringSize == 0 {
 		dialector.DefaultStringSize = 256
 	}
 
-	// Set up database connection if not provided
+	if dialector.DriverName == "" {
+		dialector.DriverName = "duckdb-gorm"
+	}
+
 	if dialector.Conn != nil {
 		db.ConnPool = dialector.Conn
 	} else {
-		driverName := dialector.DriverName
-		if driverName == "" {
-			driverName = "duckdb-gorm" // Use our custom driver
-		}
-		sqlDB, err := sql.Open(driverName, dialector.DSN)
+		connPool, err := sql.Open(dialector.DriverName, dialector.DSN)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to open database connection: %w", err)
 		}
-		db.ConnPool = sqlDB
+		db.ConnPool = connPool
 	}
-
-	// Register standard GORM callbacks
-	callbacks.RegisterDefaultCallbacks(db, &callbacks.Config{
-		CreateClauses: []string{"INSERT", "VALUES", "ON CONFLICT"},
-		UpdateClauses: []string{"UPDATE", "SET", "WHERE"},
-		DeleteClauses: []string{"DELETE", "FROM", "WHERE"},
-		QueryClauses:  []string{"SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "LIMIT", "FOR"},
-	})
 
 	return nil
 }
 
+// Migrator returns a new migrator instance for DuckDB.
 func (dialector Dialector) Migrator(db *gorm.DB) gorm.Migrator {
 	return Migrator{
 		migrator.Migrator{
@@ -276,6 +316,7 @@ func (dialector Dialector) Migrator(db *gorm.DB) gorm.Migrator {
 	}
 }
 
+// DataTypeOf returns the SQL data type for a given field.
 func (dialector Dialector) DataTypeOf(field *schema.Field) string {
 	switch field.DataType {
 	case schema.Bool:
@@ -287,11 +328,15 @@ func (dialector Dialector) DataTypeOf(field *schema.Field) string {
 		case 16:
 			return "SMALLINT"
 		case 32:
-			return "INTEGER"
+			return sqlTypeInteger
 		default:
 			return "BIGINT"
 		}
 	case schema.Uint:
+		// For primary keys, use INTEGER to enable auto-increment in DuckDB
+		if field.PrimaryKey {
+			return sqlTypeInteger
+		}
 		// Use signed integers for uint to ensure foreign key compatibility
 		// DuckDB has issues with foreign keys between signed and unsigned types
 		switch field.Size {
@@ -300,7 +345,7 @@ func (dialector Dialector) DataTypeOf(field *schema.Field) string {
 		case 16:
 			return "SMALLINT"
 		case 32:
-			return "INTEGER"
+			return sqlTypeInteger
 		default:
 			return "BIGINT"
 		}
@@ -337,6 +382,7 @@ func (dialector Dialector) DataTypeOf(field *schema.Field) string {
 	return string(field.DataType)
 }
 
+// DefaultValueOf returns the default value clause for a field.
 func (dialector Dialector) DefaultValueOf(field *schema.Field) clause.Expression {
 	if field.HasDefaultValue && (field.DefaultValueInterface != nil || field.DefaultValue != "") {
 		if field.DefaultValueInterface != nil {
@@ -362,10 +408,12 @@ func (dialector Dialector) DefaultValueOf(field *schema.Field) clause.Expression
 	return clause.Expr{}
 }
 
-func (dialector Dialector) BindVarTo(writer clause.Writer, stmt *gorm.Statement, v interface{}) {
+// BindVarTo writes the bind variable to the clause writer.
+func (dialector Dialector) BindVarTo(writer clause.Writer, _ *gorm.Statement, _ interface{}) {
 	_ = writer.WriteByte('?')
 }
 
+// QuoteTo writes quoted identifiers to the writer.
 func (dialector Dialector) QuoteTo(writer clause.Writer, str string) {
 	var (
 		underQuoted, selfQuoted bool
@@ -395,11 +443,11 @@ func (dialector Dialector) QuoteTo(writer clause.Writer, str string) {
 				_ = writer.WriteByte('"')
 				underQuoted = true
 				if selfQuoted = continuousBacktick > 0; selfQuoted {
-					continuousBacktick -= 1
+					continuousBacktick--
 				}
 			}
 
-			for ; continuousBacktick > 0; continuousBacktick -= 1 {
+			for ; continuousBacktick > 0; continuousBacktick-- {
 				_, _ = writer.WriteString(`""`)
 			}
 
@@ -414,14 +462,140 @@ func (dialector Dialector) QuoteTo(writer clause.Writer, str string) {
 	_ = writer.WriteByte('"')
 }
 
+// Explain returns an explanation of the SQL query.
 func (dialector Dialector) Explain(sql string, vars ...interface{}) string {
 	return logger.ExplainSQL(sql, nil, `"`, vars...)
 }
 
+// SavePoint creates a savepoint with the given name.
 func (dialector Dialector) SavePoint(tx *gorm.DB, name string) error {
 	return tx.Exec("SAVEPOINT " + name).Error
 }
 
+// RollbackTo rolls back to the given savepoint.
 func (dialector Dialector) RollbackTo(tx *gorm.DB, name string) error {
 	return tx.Exec("ROLLBACK TO SAVEPOINT " + name).Error
+}
+
+// beforeCreateCallback prepares the statement for auto-increment handling
+func beforeCreateCallback(_ *gorm.DB) {
+	// Nothing special needed here, just ensuring the statement is prepared
+}
+
+// createCallback handles INSERT operations with RETURNING for auto-increment fields
+func createCallback(db *gorm.DB) {
+	if db.Error != nil {
+		return
+	}
+
+	if db.Statement.Schema != nil {
+		var hasAutoIncrement bool
+		var autoIncrementField *schema.Field
+
+		// Check if we have auto-increment primary key
+		for _, field := range db.Statement.Schema.PrimaryFields {
+			if field.AutoIncrement {
+				hasAutoIncrement = true
+				autoIncrementField = field
+				break
+			}
+		}
+
+		if hasAutoIncrement {
+			// Build custom INSERT with RETURNING
+			sql, vars := buildInsertSQL(db, autoIncrementField)
+			if sql != "" {
+				// Execute with RETURNING to get the auto-generated ID
+				var id int64
+				if err := db.Raw(sql, vars...).Row().Scan(&id); err != nil {
+					if addErr := db.AddError(err); addErr != nil {
+						return
+					}
+					return
+				}
+
+				// Set the ID in the model using GORM's ReflectValue
+				if db.Statement.ReflectValue.IsValid() && db.Statement.ReflectValue.CanAddr() {
+					modelValue := db.Statement.ReflectValue
+
+					if idField := modelValue.FieldByName(autoIncrementField.Name); idField.IsValid() && idField.CanSet() {
+						// Handle different integer types
+						switch idField.Kind() {
+						case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+							if id >= 0 {
+								idField.SetUint(uint64(id))
+							}
+						case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+							idField.SetInt(id)
+						}
+					}
+				}
+
+				db.Statement.RowsAffected = 1
+				return
+			}
+		}
+	}
+
+	// Fall back to default behavior for non-auto-increment cases
+	if db.Statement.SQL.String() == "" {
+		db.Statement.Build("INSERT")
+	}
+
+	if result, err := db.Statement.ConnPool.ExecContext(db.Statement.Context, db.Statement.SQL.String(), db.Statement.Vars...); err != nil {
+		if addErr := db.AddError(err); addErr != nil {
+			return
+		}
+	} else {
+		if rows, _ := result.RowsAffected(); rows > 0 {
+			db.Statement.RowsAffected = rows
+		}
+	}
+}
+
+// buildInsertSQL creates an INSERT statement with RETURNING for auto-increment fields
+func buildInsertSQL(db *gorm.DB, autoIncrementField *schema.Field) (string, []interface{}) {
+	if db.Statement.Schema == nil {
+		return "", nil
+	}
+
+	fieldCount := len(db.Statement.Schema.Fields)
+	fields := make([]string, 0, fieldCount)
+	placeholders := make([]string, 0, fieldCount)
+	values := make([]interface{}, 0, fieldCount)
+
+	// Build field list excluding auto-increment field
+	for _, field := range db.Statement.Schema.Fields {
+		if field.DBName == autoIncrementField.DBName {
+			continue // Skip auto-increment field
+		}
+
+		// Get the value for this field
+		fieldValue := db.Statement.ReflectValue.FieldByName(field.Name)
+		if !fieldValue.IsValid() {
+			continue
+		}
+
+		// For optional fields, skip zero values
+		if field.HasDefaultValue && fieldValue.Kind() != reflect.String && fieldValue.IsZero() {
+			continue
+		}
+
+		fields = append(fields, db.Statement.Quote(field.DBName))
+		placeholders = append(placeholders, "?")
+		values = append(values, fieldValue.Interface())
+	}
+
+	if len(fields) == 0 {
+		return "", nil
+	}
+
+	tableName := db.Statement.Quote(db.Statement.Table)
+	sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING %s",
+		tableName,
+		strings.Join(fields, ", "),
+		strings.Join(placeholders, ", "),
+		db.Statement.Quote(autoIncrementField.DBName))
+
+	return sql, values
 }

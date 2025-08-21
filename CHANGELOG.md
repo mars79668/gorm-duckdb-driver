@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2025-08-20
+
+### 🔧 Fixed
+
+- **Migrator Helper Functions**: Added missing helper functions for improved migration reliability
+  - `isAlreadyExistsError()`: Checks if an error indicates object already exists (handles "already exists" and "duplicate" error patterns)
+  - `isAutoIncrementField()`: Identifies auto-increment fields for proper sequence handling
+- **Code Organization**: Better separation of concerns in migrator functionality
+
+### 🛠️ Technical Details
+
+The helper functions improve migration robustness by:
+
+- **Error Handling**: Consistent detection of duplicate object creation attempts
+- **Auto-increment Detection**: Proper identification of fields requiring sequence-based auto-increment behavior
+- **DuckDB Compatibility**: Enhanced support for DuckDB-specific migration patterns
+
+These changes maintain full backward compatibility while improving internal migration logic.
+
 ## [0.4.0] - 2025-08-14
 
 ### 🚀 Comprehensive Extension Management & Test Coverage Revolution

@@ -16,9 +16,24 @@ const (
 	sqlTypeInteger = "INTEGER"
 )
 
+// isAlreadyExistsError checks if an error indicates that an object already exists
+func isAlreadyExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "already exists") ||
+		strings.Contains(errMsg, "duplicate")
+}
+
 // Migrator implements gorm.Migrator interface for DuckDB database.
 type Migrator struct {
 	migrator.Migrator
+}
+
+// isAutoIncrementField checks if a field is an auto-increment field
+func (m Migrator) isAutoIncrementField(field *schema.Field) bool {
+	return field.AutoIncrement || (!field.HasDefaultValue && field.DataType == schema.Uint)
 }
 
 // CurrentDatabase returns the current database name.

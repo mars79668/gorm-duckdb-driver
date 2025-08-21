@@ -8,7 +8,7 @@ require (
 )
 
 // Replace directive to use the local development version
-replace github.com/greysquirr3l/gorm-duckdb-driver => ../
+replace github.com/greysquirr3l/gorm-duckdb-driver => ..
 
 require (
 	github.com/apache/arrow-go/v18 v18.4.0 // indirect

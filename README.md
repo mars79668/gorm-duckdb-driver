@@ -92,7 +92,7 @@ require (
 )
 
 // Replace directive for latest release
-replace github.com/greysquirr3l/gorm-duckdb-driver => github.com/greysquirr3l/gorm-duckdb-driver v0.4.1
+replace github.com/greysquirr3l/gorm-duckdb-driver => github.com/greysquirr3l/gorm-duckdb-driver v0.5.2
 ```
 
 ### For Local Development
@@ -104,7 +104,7 @@ If you're working with a local copy of this driver, use a local replace directiv
 replace github.com/greysquirr3l/gorm-duckdb-driver => ../../
 
 // For published version - replace with specific version
-replace github.com/greysquirr3l/gorm-duckdb-driver => github.com/greysquirr3l/gorm-duckdb-driver v0.4.1
+replace github.com/greysquirr3l/gorm-duckdb-driver => github.com/greysquirr3l/gorm-duckdb-driver v0.5.2
 ```
 
 **Step 3:** Run `go mod tidy` to update dependencies:
@@ -1193,7 +1193,6 @@ cd gorm-duckdb-driver
 go mod tidy
 ```
 
-### Testing the Advanced Features
 ### Testing the Advanced Features
 
 Validate the complete 100% GORM compliance implementation:

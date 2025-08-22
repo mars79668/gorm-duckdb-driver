@@ -87,7 +87,7 @@ module your-project
 go 1.23
 
 require (
-    github.com/greysquirr3l/gorm-duckdb-driver v0.4.1
+    github.com/greysquirr3l/gorm-duckdb-driver v0.5.2
     gorm.io/gorm v1.30.1
 )
 

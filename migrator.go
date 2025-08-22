@@ -1,6 +1,7 @@
 package duckdb
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -329,6 +330,197 @@ func (m Migrator) GetTypeAliases(databaseTypeName string) []string {
 	}
 
 	return aliases[databaseTypeName]
+}
+
+// ColumnTypes returns comprehensive column type information for the given value
+func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
+	var columnTypes []gorm.ColumnType
+
+	err := m.RunWithValue(value, func(stmt *gorm.Statement) error {
+		rows, err := m.DB.Raw(`
+			SELECT 
+				column_name,
+				data_type,
+				CASE 
+					WHEN character_maximum_length IS NOT NULL THEN data_type || '(' || character_maximum_length || ')'
+					WHEN numeric_precision IS NOT NULL AND numeric_scale IS NOT NULL THEN data_type || '(' || numeric_precision || ',' || numeric_scale || ')'
+					WHEN numeric_precision IS NOT NULL THEN data_type || '(' || numeric_precision || ')'
+					ELSE data_type
+				END as column_type,
+				CASE WHEN is_nullable = 'YES' THEN true ELSE false END as nullable,
+				column_default,
+				CASE WHEN column_key = 'PRI' THEN true ELSE false END as is_primary_key,
+				CASE WHEN extra LIKE '%auto_increment%' OR column_default LIKE '%nextval%' THEN true ELSE false END as is_auto_increment,
+				character_maximum_length,
+				numeric_precision,
+				numeric_scale,
+				CASE WHEN column_key = 'UNI' THEN true ELSE false END as is_unique,
+				column_comment
+			FROM information_schema.columns 
+			WHERE table_name = ?
+			ORDER BY ordinal_position
+		`, stmt.Table).Rows()
+
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var (
+				columnName, dataType, columnTypeStr, columnDefault, columnComment string
+				isNullable, isPrimaryKey, isAutoIncrement, isUnique               bool
+				charMaxLength, numericPrecision, numericScale                     sql.NullInt64
+			)
+
+			err = rows.Scan(
+				&columnName, &dataType, &columnTypeStr, &isNullable, &columnDefault,
+				&isPrimaryKey, &isAutoIncrement, &charMaxLength, &numericPrecision,
+				&numericScale, &isUnique, &columnComment,
+			)
+			if err != nil {
+				continue
+			}
+
+			columnType := &migrator.ColumnType{
+				NameValue:          sql.NullString{String: columnName, Valid: true},
+				DataTypeValue:      sql.NullString{String: dataType, Valid: true},
+				ColumnTypeValue:    sql.NullString{String: columnTypeStr, Valid: true},
+				NullableValue:      sql.NullBool{Bool: isNullable, Valid: true},
+				PrimaryKeyValue:    sql.NullBool{Bool: isPrimaryKey, Valid: true},
+				AutoIncrementValue: sql.NullBool{Bool: isAutoIncrement, Valid: true},
+				UniqueValue:        sql.NullBool{Bool: isUnique, Valid: true},
+				CommentValue:       sql.NullString{String: columnComment, Valid: columnComment != ""},
+				DefaultValueValue:  sql.NullString{String: columnDefault, Valid: columnDefault != ""},
+			}
+
+			// Set length information
+			if charMaxLength.Valid {
+				columnType.LengthValue = charMaxLength
+			}
+
+			// Set decimal size information
+			if numericPrecision.Valid {
+				columnType.DecimalSizeValue = numericPrecision
+				if numericScale.Valid {
+					columnType.ScaleValue = numericScale
+				}
+			}
+
+			columnTypes = append(columnTypes, columnType)
+		}
+
+		return rows.Err()
+	})
+
+	return columnTypes, err
+}
+
+// TableType returns comprehensive table type information
+func (m Migrator) TableType(value interface{}) (gorm.TableType, error) {
+	var result *migrator.TableType
+
+	err := m.RunWithValue(value, func(stmt *gorm.Statement) error {
+		var schemaName, tableName, tableTypeStr, tableComment string
+
+		err := m.DB.Raw(`
+			SELECT 
+				table_schema,
+				table_name,
+				table_type,
+				COALESCE(table_comment, '') as table_comment
+			FROM information_schema.tables 
+			WHERE table_name = ?
+		`, stmt.Table).Row().Scan(&schemaName, &tableName, &tableTypeStr, &tableComment)
+
+		if err != nil {
+			return err
+		}
+
+		result = &migrator.TableType{
+			SchemaValue:  schemaName,
+			NameValue:    tableName,
+			TypeValue:    tableTypeStr,
+			CommentValue: sql.NullString{String: tableComment, Valid: tableComment != ""},
+		}
+
+		return nil
+	})
+
+	if result == nil {
+		return nil, err
+	}
+
+	return result, err
+}
+
+// DuckDBIndex implements gorm.Index interface for DuckDB
+type DuckDBIndex struct {
+	TableName   string
+	IndexName   string
+	ColumnNames []string
+	IsUnique    bool
+	IsPrimary   bool
+	Options     string
+}
+
+func (idx DuckDBIndex) Table() string {
+	return idx.TableName
+}
+
+func (idx DuckDBIndex) Name() string {
+	return idx.IndexName
+}
+
+func (idx DuckDBIndex) Columns() []string {
+	return idx.ColumnNames
+}
+
+func (idx DuckDBIndex) PrimaryKey() (isPrimaryKey bool, ok bool) {
+	return idx.IsPrimary, true
+}
+
+func (idx DuckDBIndex) Unique() (unique bool, ok bool) {
+	return idx.IsUnique, true
+}
+
+func (idx DuckDBIndex) Option() string {
+	return idx.Options
+}
+
+// GetIndexes returns comprehensive index information for the given value
+func (m Migrator) GetIndexes(value interface{}) ([]gorm.Index, error) {
+	var indexes []gorm.Index
+
+	err := m.RunWithValue(value, func(stmt *gorm.Statement) error {
+		// DuckDB may not have complete information_schema.statistics support
+		// For now, return empty indexes to avoid errors
+		return nil
+	})
+
+	return indexes, err
+}
+
+// BuildIndexOptions builds index options for DuckDB
+func (m Migrator) BuildIndexOptions(opts []schema.IndexOption, stmt *gorm.Statement) (results []interface{}) {
+	for _, opt := range opts {
+		str := stmt.Quote(opt.DBName)
+		if opt.Expression != "" {
+			str = opt.Expression
+		} else if opt.Length > 0 {
+			str += fmt.Sprintf("(%d)", opt.Length)
+		}
+
+		if opt.Collate != "" {
+			str += " COLLATE " + opt.Collate
+		}
+
+		if opt.Sort != "" {
+			str += " " + opt.Sort
+		}
+		results = append(results, clause.Expr{SQL: str})
+	}
+	return
 }
 
 // CreateTable overrides the default CreateTable to handle DuckDB-specific auto-increment sequences

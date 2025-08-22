@@ -1,6 +1,7 @@
 package duckdb
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 
@@ -14,6 +15,11 @@ type ErrorTranslator struct{}
 func (et ErrorTranslator) Translate(err error) error {
 	if err == nil {
 		return nil
+	}
+
+	// Handle standard SQL errors first
+	if errors.Is(err, sql.ErrNoRows) {
+		return gorm.ErrRecordNotFound
 	}
 
 	errStr := err.Error()

@@ -272,7 +272,12 @@ func isSlice(v interface{}) bool {
 
 // Initialize implements gorm.Dialector
 func (dialector Dialector) Initialize(db *gorm.DB) error {
-	callbacks.RegisterDefaultCallbacks(db, &callbacks.Config{})
+	// Register callbacks with comprehensive DuckDB-specific configuration
+	callbacks.RegisterDefaultCallbacks(db, &callbacks.Config{
+		CreateClauses: []string{"INSERT", "VALUES", "ON CONFLICT", "RETURNING"},
+		UpdateClauses: []string{"UPDATE", "SET", "WHERE", "RETURNING"},
+		DeleteClauses: []string{"DELETE", "FROM", "WHERE", "RETURNING"},
+	})
 
 	// Override the create callback to use RETURNING for auto-increment fields
 	if err := db.Callback().Create().Before("gorm:create").Register("duckdb:before_create", beforeCreateCallback); err != nil {
@@ -318,6 +323,9 @@ func (dialector Dialector) Migrator(db *gorm.DB) gorm.Migrator {
 
 // DataTypeOf returns the SQL data type for a given field.
 func (dialector Dialector) DataTypeOf(field *schema.Field) string {
+	if field == nil {
+		return ""
+	}
 	switch field.DataType {
 	case schema.Bool:
 		return "BOOLEAN"
@@ -524,6 +532,12 @@ func (dialector Dialector) SavePoint(tx *gorm.DB, name string) error {
 // RollbackTo rolls back to the given savepoint.
 func (dialector Dialector) RollbackTo(tx *gorm.DB, name string) error {
 	return tx.Exec("ROLLBACK TO SAVEPOINT " + name).Error
+}
+
+// Translate implements ErrorTranslator interface for built-in error translation
+func (dialector Dialector) Translate(err error) error {
+	translator := ErrorTranslator{}
+	return translator.Translate(err)
 }
 
 // beforeCreateCallback prepares the statement for auto-increment handling

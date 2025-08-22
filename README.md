@@ -2,8 +2,6 @@
 
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/greysquirr3l/gorm-duckdb-driver) [![Coverage](https://img.shields.io/badge/coverage-67.7%25-yellow.svg)](https://github.com/greysquirr3l/gorm-duckdb-driver)
 
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](https://github.com/greysquirr3l/gorm-duckdb-driver) [![Coverage](https://img.shields.io/badge/coverage-67.7%25-yellow.svg)](https://github.com/greysquirr3l/gorm-duckdb-driver)
-
 A comprehensive DuckDB driver for [GORM](https://gorm.io), following the same patterns and conventions used by other official GORM drivers.
 
 ## Features

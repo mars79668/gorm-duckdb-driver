@@ -47,14 +47,13 @@ func (a StringArray) Value() (driver.Value, error) {
 		return "[]", nil
 	}
 
-	elements := make([]string, 0, len(a))
-	for _, s := range a {
-		// Escape single quotes in strings
-		escaped := strings.ReplaceAll(s, "'", "''")
-		elements = append(elements, fmt.Sprintf("'%s'", escaped))
+	// Use JSON format for consistency with tests
+	jsonBytes, err := json.Marshal([]string(a))
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal StringArray to JSON: %w", err)
 	}
 
-	return "[" + strings.Join(elements, ", ") + "]", nil
+	return string(jsonBytes), nil
 }
 
 // Scan implements sql.Scanner interface for StringArray
@@ -71,16 +70,11 @@ func (a *StringArray) Scan(value interface{}) error {
 		return a.scanFromString(string(v))
 	case []interface{}:
 		return a.scanFromSlice(v)
-	default:
-		// Try JSON unmarshaling as fallback
-		data, err := json.Marshal(value)
-		if err != nil {
-			return fmt.Errorf("cannot scan %T into StringArray", value)
-		}
-		if err := json.Unmarshal(data, a); err != nil {
-			return fmt.Errorf("failed to unmarshal JSON data into StringArray: %w", err)
-		}
+	case []string:
+		*a = StringArray(v)
 		return nil
+	default:
+		return fmt.Errorf("cannot scan %T into StringArray", value)
 	}
 }
 
@@ -93,7 +87,19 @@ func (a *StringArray) scanFromString(s string) error {
 		return nil
 	}
 
-	// Remove brackets
+	// If it looks like JSON (starts with [), try JSON parsing first
+	if strings.HasPrefix(s, "[") {
+		var jsonArray []string
+		if err := json.Unmarshal([]byte(s), &jsonArray); err != nil {
+			// If it looks like JSON but fails to parse, return error
+			return fmt.Errorf("invalid JSON array format: %w", err)
+		}
+		*a = StringArray(jsonArray)
+		return nil
+	}
+
+	// Fallback to DuckDB array format parsing
+	// Remove brackets if present
 	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
 		s = s[1 : len(s)-1]
 	}
@@ -128,8 +134,15 @@ func (a *StringArray) scanFromString(s string) error {
 
 func (a *StringArray) scanFromSlice(slice []interface{}) error {
 	result := make(StringArray, 0, len(slice))
-	for _, item := range slice {
-		result = append(result, fmt.Sprintf("%v", item))
+	for i, item := range slice {
+		switch v := item.(type) {
+		case string:
+			result = append(result, v)
+		case nil:
+			result = append(result, "")
+		default:
+			return fmt.Errorf("cannot convert element %d of type %T to string", i, item)
+		}
 	}
 	*a = result
 	return nil
@@ -148,12 +161,13 @@ func (a IntArray) Value() (driver.Value, error) {
 		return "[]", nil
 	}
 
-	elements := make([]string, 0, len(a))
-	for _, i := range a {
-		elements = append(elements, fmt.Sprintf("%d", i))
+	// Use JSON format for consistency
+	jsonBytes, err := json.Marshal([]int64(a))
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal IntArray to JSON: %w", err)
 	}
 
-	return "[" + strings.Join(elements, ", ") + "]", nil
+	return string(jsonBytes), nil
 }
 
 // Scan implements sql.Scanner interface for IntArray
@@ -170,12 +184,30 @@ func (a *IntArray) Scan(value interface{}) error {
 		return a.scanFromString(string(v))
 	case []interface{}:
 		return a.scanFromSlice(v)
+	case []int64:
+		*a = IntArray(v)
+		return nil
 	default:
 		return fmt.Errorf("cannot scan %T into IntArray", value)
 	}
 }
 
 func (a *IntArray) scanFromString(s string) error {
+	s = strings.TrimSpace(s)
+
+	if s == "[]" || s == "" {
+		*a = IntArray{}
+		return nil
+	}
+
+	// Try JSON unmarshaling first
+	var jsonArray []int64
+	if err := json.Unmarshal([]byte(s), &jsonArray); err == nil {
+		*a = IntArray(jsonArray)
+		return nil
+	}
+
+	// Fallback to custom parsing
 	parts := parseArrayString(s)
 
 	if len(parts) == 0 {
@@ -231,12 +263,13 @@ func (a FloatArray) Value() (driver.Value, error) {
 		return "[]", nil
 	}
 
-	elements := make([]string, 0, len(a))
-	for _, f := range a {
-		elements = append(elements, fmt.Sprintf("%g", f))
+	// Use JSON format for consistency
+	jsonBytes, err := json.Marshal([]float64(a))
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal FloatArray to JSON: %w", err)
 	}
 
-	return "[" + strings.Join(elements, ", ") + "]", nil
+	return string(jsonBytes), nil
 }
 
 // Scan implements sql.Scanner interface for FloatArray
@@ -253,12 +286,30 @@ func (a *FloatArray) Scan(value interface{}) error {
 		return a.scanFromString(string(v))
 	case []interface{}:
 		return a.scanFromSlice(v)
+	case []float64:
+		*a = FloatArray(v)
+		return nil
 	default:
 		return fmt.Errorf("cannot scan %T into FloatArray", value)
 	}
 }
 
 func (a *FloatArray) scanFromString(s string) error {
+	s = strings.TrimSpace(s)
+
+	if s == "[]" || s == "" {
+		*a = FloatArray{}
+		return nil
+	}
+
+	// Try JSON unmarshaling first
+	var jsonArray []float64
+	if err := json.Unmarshal([]byte(s), &jsonArray); err == nil {
+		*a = FloatArray(jsonArray)
+		return nil
+	}
+
+	// Fallback to custom parsing
 	parts := parseArrayString(s)
 
 	if len(parts) == 0 {
@@ -305,7 +356,7 @@ func (a *FloatArray) scanFromSlice(slice []interface{}) error {
 
 // GormDataType implements the GormDataTypeInterface for StringArray
 func (StringArray) GormDataType() string {
-	return "TEXT[]"
+	return "VARCHAR[]"
 }
 
 // GormDataType implements the GormDataTypeInterface for IntArray

@@ -41,6 +41,7 @@ Thumbs.db
 next.md
 RELEASE.md
 bugs/*.md
+bugs/*.txt
 
 # Test directories (these should be run with 'go run' or 'go test', not committed as binaries)
 example/test_time/

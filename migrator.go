@@ -3,6 +3,7 @@ package duckdb
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -337,11 +338,13 @@ func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
 	var columnTypes []gorm.ColumnType
 
 	err := m.RunWithValue(value, func(stmt *gorm.Statement) error {
+		// DuckDB information_schema columns differ from MySQL: there is no column_key or extra
+		// Use data_type/udt_name and rely on column_default for sequence/nextval detection
 		rows, err := m.DB.Raw(`
-			SELECT 
+			SELECT
 				column_name,
 				data_type,
-				CASE 
+				CASE
 					WHEN character_maximum_length IS NOT NULL THEN data_type || '(' || character_maximum_length || ')'
 					WHEN numeric_precision IS NOT NULL AND numeric_scale IS NOT NULL THEN data_type || '(' || numeric_precision || ',' || numeric_scale || ')'
 					WHEN numeric_precision IS NOT NULL THEN data_type || '(' || numeric_precision || ')'
@@ -349,20 +352,24 @@ func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
 				END as column_type,
 				CASE WHEN is_nullable = 'YES' THEN true ELSE false END as nullable,
 				column_default,
-				CASE WHEN column_key = 'PRI' THEN true ELSE false END as is_primary_key,
-				CASE WHEN extra LIKE '%auto_increment%' OR column_default LIKE '%nextval%' THEN true ELSE false END as is_auto_increment,
+				-- DuckDB does not expose column_key; determine primary key from pragma or information_schema.table_constraints if needed elsewhere
+				false as is_primary_key,
+				CASE WHEN column_default LIKE '%nextval%' OR column_default LIKE '%seq_%' THEN true ELSE false END as is_auto_increment,
 				character_maximum_length,
 				numeric_precision,
 				numeric_scale,
-				CASE WHEN column_key = 'UNI' THEN true ELSE false END as is_unique,
-				column_comment
-			FROM information_schema.columns 
+				false as is_unique,
+				'' as column_comment
+			FROM information_schema.columns
 			WHERE table_name = ?
 			ORDER BY ordinal_position
 		`, stmt.Table).Rows()
 
 		if err != nil {
 			return err
+		}
+		if rows == nil {
+			return nil
 		}
 		defer rows.Close()
 
@@ -373,12 +380,12 @@ func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
 				charMaxLength, numericPrecision, numericScale                     sql.NullInt64
 			)
 
-			err = rows.Scan(
+			if scanErr := rows.Scan(
 				&columnName, &dataType, &columnTypeStr, &isNullable, &columnDefault,
 				&isPrimaryKey, &isAutoIncrement, &charMaxLength, &numericPrecision,
 				&numericScale, &isUnique, &columnComment,
-			)
-			if err != nil {
+			); scanErr != nil {
+				// Skip malformed rows but continue processing others
 				continue
 			}
 
@@ -394,9 +401,21 @@ func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
 				DefaultValueValue:  sql.NullString{String: columnDefault, Valid: columnDefault != ""},
 			}
 
-			// Set length information
+			// Set length information defensively
 			if charMaxLength.Valid {
 				columnType.LengthValue = charMaxLength
+			} else {
+				// Try to parse length from the column_type string, e.g. varchar(255)
+				if idx := strings.Index(columnTypeStr, "("); idx > 0 {
+					// naive parse between parentheses
+					end := strings.Index(columnTypeStr[idx+1:], ")")
+					if end > 0 {
+						// Attempt to parse integer
+						if l, parseErr := strconv.ParseInt(columnTypeStr[idx+1:idx+1+end], 10, 64); parseErr == nil {
+							columnType.LengthValue = sql.NullInt64{Int64: l, Valid: true}
+						}
+					}
+				}
 			}
 
 			// Set decimal size information
@@ -526,8 +545,8 @@ func (m Migrator) BuildIndexOptions(opts []schema.IndexOption, stmt *gorm.Statem
 // CreateTable overrides the default CreateTable to handle DuckDB-specific auto-increment sequences
 func (m Migrator) CreateTable(values ...interface{}) error {
 	for _, value := range values {
+		// First, create sequences for auto-increment primary key fields using a statement context
 		if err := m.RunWithValue(value, func(stmt *gorm.Statement) error {
-			// First, create sequences for auto-increment primary key fields
 			if stmt.Schema != nil {
 				for _, field := range stmt.Schema.Fields {
 					if field.PrimaryKey && (field.AutoIncrement || (!field.HasDefaultValue && field.DataType == schema.Uint)) {
@@ -542,9 +561,19 @@ func (m Migrator) CreateTable(values ...interface{}) error {
 					}
 				}
 			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("failed to create sequences for table: %w", err)
+		}
 
-			// Now create the table using the parent method
-			return m.Migrator.CreateTable(value)
+		// Now create the table using the parent method INSIDE RunWithValue so the statement
+		// context (stmt.Table and schema) is preserved for SQL generation.
+		if err := m.RunWithValue(value, func(stmt *gorm.Statement) error {
+			// Call parent CreateTable while we have a valid stmt context
+			if err := m.Migrator.CreateTable(value); err != nil {
+				return fmt.Errorf("failed to create table: %w", err)
+			}
+			return nil
 		}); err != nil {
 			return fmt.Errorf("failed to create table: %w", err)
 		}

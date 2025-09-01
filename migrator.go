@@ -405,14 +405,21 @@ func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
 			if charMaxLength.Valid {
 				columnType.LengthValue = charMaxLength
 			} else {
-				// Try to parse length from the column_type string, e.g. varchar(255)
-				if idx := strings.Index(columnTypeStr, "("); idx > 0 {
-					// naive parse between parentheses
-					end := strings.Index(columnTypeStr[idx+1:], ")")
-					if end > 0 {
-						// Attempt to parse integer
-						if l, parseErr := strconv.ParseInt(columnTypeStr[idx+1:idx+1+end], 10, 64); parseErr == nil {
-							columnType.LengthValue = sql.NullInt64{Int64: l, Valid: true}
+				// Prefer schema metadata if available
+				if stmt := m.DB.Statement; stmt != nil && stmt.Schema != nil {
+					// Look up field by column name
+					if f := stmt.Schema.LookUpField(columnName); f != nil && f.Size > 0 {
+						columnType.LengthValue = sql.NullInt64{Int64: int64(f.Size), Valid: true}
+					} else {
+						// Try to parse from column_type string as fallback
+						if idx := strings.Index(columnTypeStr, "("); idx > 0 {
+							// naive parse between parentheses
+							end := strings.Index(columnTypeStr[idx+1:], ")")
+							if end > 0 {
+								if l, parseErr := strconv.ParseInt(columnTypeStr[idx+1:idx+1+end], 10, 64); parseErr == nil {
+									columnType.LengthValue = sql.NullInt64{Int64: l, Valid: true}
+								}
+							}
 						}
 					}
 				}
@@ -569,7 +576,12 @@ func (m Migrator) CreateTable(values ...interface{}) error {
 		// Now create the table using the parent method INSIDE RunWithValue so the statement
 		// context (stmt.Table and schema) is preserved for SQL generation.
 		if err := m.RunWithValue(value, func(stmt *gorm.Statement) error {
-			// Call parent CreateTable while we have a valid stmt context
+			// Ensure parent migrator sees the same statement context by
+			// temporarily assigning it to m.DB.Statement. Restore after.
+			prevStmt := m.DB.Statement
+			m.DB.Statement = stmt
+			defer func() { m.DB.Statement = prevStmt }()
+
 			if err := m.Migrator.CreateTable(value); err != nil {
 				return fmt.Errorf("failed to create table: %w", err)
 			}

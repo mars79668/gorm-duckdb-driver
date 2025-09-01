@@ -278,23 +278,28 @@ func (dialector Dialector) Initialize(db *gorm.DB) error {
 	if db == nil {
 		return fmt.Errorf("gorm DB instance is nil in Initialize")
 	}
-	// Register callbacks per DB instance to avoid duplicate registrations when tests open multiple DBs
-	if v, ok := db.InstanceGet("gorm-duckdb:callbacks_registered"); !ok || v == nil {
-		callbacks.RegisterDefaultCallbacks(db, &callbacks.Config{
-			CreateClauses: []string{"INSERT", "VALUES", "ON CONFLICT", "RETURNING"},
-			UpdateClauses: []string{"UPDATE", "SET", "WHERE", "RETURNING"},
-			DeleteClauses: []string{"DELETE", "FROM", "WHERE", "RETURNING"},
-		})
+	// Register default callbacks; tolerate duplicate-registration errors so Initialize
+	// can be called multiple times across tests without panicking.
+	callbacks.RegisterDefaultCallbacks(db, &callbacks.Config{
+		CreateClauses: []string{"INSERT", "VALUES", "ON CONFLICT", "RETURNING"},
+		UpdateClauses: []string{"UPDATE", "SET", "WHERE", "RETURNING"},
+		DeleteClauses: []string{"DELETE", "FROM", "WHERE", "RETURNING"},
+	})
 
-		// Override the create callback to use RETURNING for auto-increment fields
-		if err := db.Callback().Create().Before("gorm:create").Register("duckdb:before_create", beforeCreateCallback); err != nil {
+	// Override the create callback to use RETURNING for auto-increment fields.
+	if err := db.Callback().Create().Before("gorm:create").Register("duckdb:before_create", beforeCreateCallback); err != nil {
+		// Ignore duplicate/already-registered errors
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicated") && !strings.Contains(strings.ToLower(err.Error()), "already") {
 			return fmt.Errorf("failed to register before create callback: %w", err)
 		}
-		if err := db.Callback().Create().Replace("gorm:create", createCallback); err != nil {
+	}
+
+	// Replace the core create callback with our custom implementation. Replace may fail
+	// in some gorm versions if not available; tolerate errors that indicate prior registration.
+	if err := db.Callback().Create().Replace("gorm:create", createCallback); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicated") && !strings.Contains(strings.ToLower(err.Error()), "already") {
 			return fmt.Errorf("failed to replace create callback: %w", err)
 		}
-
-		db.InstanceSet("gorm-duckdb:callbacks_registered", true)
 	}
 
 	if dialector.DefaultStringSize == 0 {

@@ -12,7 +12,7 @@ import (
 
 	"github.com/marcboeker/go-duckdb/v2"
 	"gorm.io/gorm"
-	"gorm.io/gorm/callbacks"
+	// callbacks intentionally not imported here to avoid re-registering defaults
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/migrator"
@@ -280,11 +280,8 @@ func (dialector Dialector) Initialize(db *gorm.DB) error {
 	}
 	// Register default callbacks; tolerate duplicate-registration errors so Initialize
 	// can be called multiple times across tests without panicking.
-	callbacks.RegisterDefaultCallbacks(db, &callbacks.Config{
-		CreateClauses: []string{"INSERT", "VALUES", "ON CONFLICT", "RETURNING"},
-		UpdateClauses: []string{"UPDATE", "SET", "WHERE", "RETURNING"},
-		DeleteClauses: []string{"DELETE", "FROM", "WHERE", "RETURNING"},
-	})
+	// Do not call callbacks.RegisterDefaultCallbacks here to avoid re-registering
+	// GORM's default callbacks multiple times across repeated Initialize calls in tests.
 
 	// Override the create callback to use RETURNING for auto-increment fields.
 	if err := db.Callback().Create().Before("gorm:create").Register("duckdb:before_create", beforeCreateCallback); err != nil {

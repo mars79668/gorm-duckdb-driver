@@ -57,8 +57,15 @@ func (m Migrator) FullDataTypeOf(field *schema.Field) clause.Expr {
 		// DuckDB doesn't support native AUTO_INCREMENT, so we use sequences to emulate this behavior for auto-increment primary keys
 		// Check if this is an auto-increment field (no default value specified)
 		if m.isAutoIncrementField(field) {
-			// Use BIGINT with a default sequence value
-			expr.SQL = "BIGINT DEFAULT nextval('seq_" + strings.ToLower(field.Schema.Table) + "_" + strings.ToLower(field.DBName) + "')"
+			// Use BIGINT with a default sequence value. If field.Schema is nil
+			// try to derive the table name from m.DB.Statement.
+			tableName := ""
+			if field != nil && field.Schema != nil && field.Schema.Table != "" {
+				tableName = field.Schema.Table
+			} else if m.DB != nil && m.DB.Statement != nil && m.DB.Statement.Table != "" {
+				tableName = m.DB.Statement.Table
+			}
+			expr.SQL = "BIGINT DEFAULT nextval('seq_" + strings.ToLower(tableName) + "_" + strings.ToLower(field.DBName) + "')"
 		} else {
 			// Make sure the data type is clean for non-auto-increment primary keys
 			upperDataType := strings.ToUpper(dataType)
@@ -405,8 +412,8 @@ func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
 			if charMaxLength.Valid {
 				columnType.LengthValue = charMaxLength
 			} else {
-				// Prefer schema metadata if available
-				if stmt := m.DB.Statement; stmt != nil && stmt.Schema != nil {
+				// Prefer schema metadata if available (use closure stmt)
+				if stmt != nil && stmt.Schema != nil {
 					// Look up field by column name
 					if f := stmt.Schema.LookUpField(columnName); f != nil && f.Size > 0 {
 						columnType.LengthValue = sql.NullInt64{Int64: int64(f.Size), Valid: true}
@@ -553,7 +560,9 @@ func (m Migrator) BuildIndexOptions(opts []schema.IndexOption, stmt *gorm.Statem
 func (m Migrator) CreateTable(values ...interface{}) error {
 	for _, value := range values {
 		// First, create sequences for auto-increment primary key fields using a statement context
+		var lastStmt *gorm.Statement
 		if err := m.RunWithValue(value, func(stmt *gorm.Statement) error {
+			lastStmt = stmt
 			if stmt.Schema != nil {
 				for _, field := range stmt.Schema.Fields {
 					if field.PrimaryKey && (field.AutoIncrement || (!field.HasDefaultValue && field.DataType == schema.Uint)) {
@@ -573,22 +582,21 @@ func (m Migrator) CreateTable(values ...interface{}) error {
 			return fmt.Errorf("failed to create sequences for table: %w", err)
 		}
 
-		// Now create the table using the parent method INSIDE RunWithValue so the statement
-		// context (stmt.Table and schema) is preserved for SQL generation.
-		if err := m.RunWithValue(value, func(stmt *gorm.Statement) error {
-			// Ensure parent migrator sees the same statement context by
-			// temporarily assigning it to m.DB.Statement. Restore after.
-			prevStmt := m.DB.Statement
-			m.DB.Statement = stmt
-			defer func() { m.DB.Statement = prevStmt }()
-
-			if err := m.Migrator.CreateTable(value); err != nil {
-				return fmt.Errorf("failed to create table: %w", err)
-			}
-			return nil
-		}); err != nil {
+		// Now create the table using the parent migrator. The parent expects a
+		// valid DB.Statement with Table/Schema set; temporarily assign lastStmt
+		// to m.DB.Statement so the parent can build correct SQL, then restore.
+		prevStmt := m.DB.Statement
+		if lastStmt != nil {
+			m.DB.Statement = lastStmt
+		} else {
+			m.DB.Statement = &gorm.Statement{DB: m.DB}
+		}
+		if err := m.Migrator.CreateTable(value); err != nil {
+			// restore before returning
+			m.DB.Statement = prevStmt
 			return fmt.Errorf("failed to create table: %w", err)
 		}
+		m.DB.Statement = prevStmt
 	}
 	return nil
 }

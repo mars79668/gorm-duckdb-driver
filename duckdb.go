@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"log"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -13,13 +14,29 @@ import (
 
 	"github.com/marcboeker/go-duckdb/v2"
 	"gorm.io/gorm"
-
-	// callbacks intentionally not imported here to avoid re-registering defaults
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/migrator"
 	"gorm.io/gorm/schema"
 )
+
+// debugLogging controls whether detailed debug logging is enabled
+// Set via environment variable GORM_DUCKDB_DEBUG=true or GORM_DUCKDB_DEBUG=1
+// debugLogging controls whether detailed debug logging is enabled
+// Set via environment variable GORM_DUCKDB_DEBUG=true or GORM_DUCKDB_DEBUG=1
+var debugLogging = os.Getenv("GORM_DUCKDB_DEBUG") == "true" || os.Getenv("GORM_DUCKDB_DEBUG") == "1"
+
+// debugLog logs messages only when debug logging is enabled
+func debugLog(format string, args ...interface{}) {
+	if debugLogging {
+		log.Printf("[GORM-DUCKDB-DEBUG] "+format, args...)
+	}
+}
+
+// errorLog logs error messages (always enabled)
+func errorLog(format string, args ...interface{}) {
+	log.Printf("[GORM-DUCKDB-ERROR] "+format, args...)
+}
 
 // Dialector implements gorm.Dialector interface for DuckDB database.
 type Dialector struct {
@@ -84,13 +101,13 @@ type convertingDriver struct {
 }
 
 func (d *convertingDriver) Open(name string) (driver.Conn, error) {
-	log.Printf("[DEBUG] convertingDriver.Open called with DSN: %s", name)
+	debugLog(" convertingDriver.Open called with DSN: %s", name)
 	conn, err := d.Driver.Open(name)
 	if err != nil {
-		log.Printf("[DEBUG] convertingDriver.Open failed: %v", err)
+		debugLog(" convertingDriver.Open failed: %v", err)
 		return nil, err
 	}
-	log.Printf("[DEBUG] convertingDriver.Open succeeded, returning convertingConn")
+	debugLog(" convertingDriver.Open succeeded, returning convertingConn")
 	return &convertingConn{conn}, nil
 }
 
@@ -99,33 +116,33 @@ type convertingConn struct {
 }
 
 func (c *convertingConn) Prepare(query string) (driver.Stmt, error) {
-	log.Printf("[DEBUG] Prepare called with query: %s", query)
+	debugLog(" Prepare called with query: %s", query)
 	stmt, err := c.Conn.Prepare(query)
 	if err != nil {
-		log.Printf("[DEBUG] Prepare failed: %v", err)
+		debugLog(" Prepare failed: %v", err)
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
-	log.Printf("[DEBUG] Prepare succeeded, returning convertingStmt")
+	debugLog(" Prepare succeeded, returning convertingStmt")
 	return &convertingStmt{stmt}, nil
 }
 
 func (c *convertingConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
-	log.Printf("[DEBUG] PrepareContext called with query: %s", query)
+	debugLog(" PrepareContext called with query: %s", query)
 	if prepCtx, ok := c.Conn.(driver.ConnPrepareContext); ok {
 		stmt, err := prepCtx.PrepareContext(ctx, query)
 		if err != nil {
-			log.Printf("[DEBUG] PrepareContext failed: %v", err)
+			debugLog(" PrepareContext failed: %v", err)
 			return nil, fmt.Errorf("failed to prepare statement with context: %w", err)
 		}
-		log.Printf("[DEBUG] PrepareContext succeeded, returning convertingStmt")
+		debugLog(" PrepareContext succeeded, returning convertingStmt")
 		return &convertingStmt{stmt}, nil
 	}
-	log.Printf("[DEBUG] PrepareContext falling back to Prepare")
+	debugLog(" PrepareContext falling back to Prepare")
 	return c.Prepare(query)
 }
 
 func (c *convertingConn) Exec(query string, args []driver.Value) (driver.Result, error) {
-	log.Printf("[DEBUG] Exec (non-context) called with query: %s, args: %v", query, args)
+	debugLog(" Exec (non-context) called with query: %s, args: %v", query, args)
 	// Convert to context-aware version - this is the recommended approach
 	namedArgs := make([]driver.NamedValue, len(args))
 	for i, arg := range args {
@@ -136,23 +153,23 @@ func (c *convertingConn) Exec(query string, args []driver.Value) (driver.Result,
 	}
 	result, err := c.ExecContext(context.Background(), query, namedArgs)
 	if err != nil {
-		log.Printf("[DEBUG] Exec (non-context) failed: %v", err)
+		debugLog(" Exec (non-context) failed: %v", err)
 	} else {
-		log.Printf("[DEBUG] Exec (non-context) succeeded")
+		debugLog(" Exec (non-context) succeeded")
 	}
 	return result, err
 }
 
 func (c *convertingConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	log.Printf("[DEBUG] ExecContext called with query: %s, args: %v", query, args)
+	debugLog(" ExecContext called with query: %s, args: %v", query, args)
 	if execCtx, ok := c.Conn.(driver.ExecerContext); ok {
 		convertedArgs := convertNamedValues(args)
 		result, err := execCtx.ExecContext(ctx, query, convertedArgs)
 		if err != nil {
-			log.Printf("[ERROR] ExecContext failed: %v", err)
+			errorLog(" ExecContext failed: %v", err)
 			return nil, translateDriverError(err)
 		}
-		log.Printf("[DEBUG] ExecContext succeeded for query: %s", query)
+		debugLog(" ExecContext succeeded for query: %s", query)
 		return result, nil
 	}
 	// Fallback to non-context version
@@ -163,18 +180,18 @@ func (c *convertingConn) ExecContext(ctx context.Context, query string, args []d
 	if exec, ok := c.Conn.(driver.Execer); ok {
 		result, err := exec.Exec(query, values)
 		if err != nil {
-			log.Printf("[ERROR] Exec fallback failed: %v", err)
+			errorLog(" Exec fallback failed: %v", err)
 			return nil, translateDriverError(err)
 		}
-		log.Printf("[DEBUG] Exec fallback succeeded for query: %s", query)
+		debugLog(" Exec fallback succeeded for query: %s", query)
 		return result, nil
 	}
-	log.Printf("[ERROR] ExecContext: underlying driver does not support Exec operations for query: %s", query)
+	errorLog(" ExecContext: underlying driver does not support Exec operations for query: %s", query)
 	return nil, fmt.Errorf("underlying driver does not support Exec operations")
 }
 
 func (c *convertingConn) Query(query string, args []driver.Value) (driver.Rows, error) {
-	log.Printf("[DEBUG] Query called with query: %s, args: %v", query, args)
+	debugLog(" Query called with query: %s, args: %v", query, args)
 	// Convert to context-aware version - this is the recommended approach
 	namedArgs := make([]driver.NamedValue, len(args))
 	for i, arg := range args {
@@ -184,25 +201,25 @@ func (c *convertingConn) Query(query string, args []driver.Value) (driver.Rows, 
 		}
 	}
 	result, err := c.QueryContext(context.Background(), query, namedArgs)
-	log.Printf("[DEBUG] Query result: %v, err: %v", result, err)
+	debugLog(" Query result: %v, err: %v", result, err)
 	return result, err
 }
 
 func (c *convertingConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	log.Printf("[DEBUG] QueryContext called with query: %s, args: %v", query, args)
+	debugLog(" QueryContext called with query: %s, args: %v", query, args)
 	if queryCtx, ok := c.Conn.(driver.QueryerContext); ok {
-		log.Printf("[DEBUG] Using QueryerContext interface")
+		debugLog(" Using QueryerContext interface")
 		convertedArgs := convertNamedValues(args)
-		log.Printf("[DEBUG] Converted args: %v", convertedArgs)
+		debugLog(" Converted args: %v", convertedArgs)
 		rows, err := queryCtx.QueryContext(ctx, query, convertedArgs)
 		if err != nil {
-			log.Printf("[ERROR] QueryContext failed: %v", err)
+			errorLog(" QueryContext failed: %v", err)
 			return nil, translateDriverError(err)
 		}
-		log.Printf("[DEBUG] QueryContext returned rows: %v (nil: %t)", rows, rows == nil)
+		debugLog(" QueryContext returned rows: %v (nil: %t)", rows, rows == nil)
 		return rows, nil
 	}
-	log.Printf("[DEBUG] QueryContext: Falling back to non-context version for query: %s", query)
+	debugLog(" QueryContext: Falling back to non-context version for query: %s", query)
 	values := make([]driver.Value, len(args))
 	for i, arg := range args {
 		values[i] = arg.Value
@@ -210,13 +227,13 @@ func (c *convertingConn) QueryContext(ctx context.Context, query string, args []
 	if queryer, ok := c.Conn.(driver.Queryer); ok {
 		rows, err := queryer.Query(query, values)
 		if err != nil {
-			log.Printf("[ERROR] Query fallback failed: %v", err)
+			errorLog(" Query fallback failed: %v", err)
 			return nil, translateDriverError(err)
 		}
-		log.Printf("[DEBUG] Query fallback succeeded for query: %s", query)
+		debugLog(" Query fallback succeeded for query: %s", query)
 		return rows, nil
 	}
-	log.Printf("[ERROR] QueryContext: underlying driver does not support Query operations for query: %s", query)
+	errorLog(" QueryContext: underlying driver does not support Query operations for query: %s", query)
 	return nil, fmt.Errorf("underlying driver does not support Query operations")
 }
 
@@ -225,7 +242,7 @@ type convertingStmt struct {
 }
 
 func (s *convertingStmt) Exec(args []driver.Value) (driver.Result, error) {
-	log.Printf("[DEBUG] convertingStmt.Exec called with args: %v", args)
+	debugLog(" convertingStmt.Exec called with args: %v", args)
 	// Convert to context-aware version - this is the recommended approach
 	namedArgs := make([]driver.NamedValue, len(args))
 	for i, arg := range args {
@@ -236,15 +253,15 @@ func (s *convertingStmt) Exec(args []driver.Value) (driver.Result, error) {
 	}
 	result, err := s.ExecContext(context.Background(), namedArgs)
 	if err != nil {
-		log.Printf("[DEBUG] convertingStmt.Exec failed: %v", err)
+		debugLog(" convertingStmt.Exec failed: %v", err)
 	} else {
-		log.Printf("[DEBUG] convertingStmt.Exec succeeded")
+		debugLog(" convertingStmt.Exec succeeded")
 	}
 	return result, err
 }
 
 func (s *convertingStmt) Query(args []driver.Value) (driver.Rows, error) {
-	log.Printf("[DEBUG] convertingStmt.Query called with args: %v", args)
+	debugLog(" convertingStmt.Query called with args: %v", args)
 	// Convert to context-aware version - this is the recommended approach
 	namedArgs := make([]driver.NamedValue, len(args))
 	for i, arg := range args {
@@ -254,20 +271,20 @@ func (s *convertingStmt) Query(args []driver.Value) (driver.Rows, error) {
 		}
 	}
 	result, err := s.QueryContext(context.Background(), namedArgs)
-	log.Printf("[DEBUG] convertingStmt.Query result: %v, err: %v", result, err)
+	debugLog(" convertingStmt.Query result: %v, err: %v", result, err)
 	return result, err
 }
 
 func (s *convertingStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
-	log.Printf("[DEBUG] convertingStmt.ExecContext called with args: %v", args)
+	debugLog(" convertingStmt.ExecContext called with args: %v", args)
 	if stmtCtx, ok := s.Stmt.(driver.StmtExecContext); ok {
 		convertedArgs := convertNamedValues(args)
 		result, err := stmtCtx.ExecContext(ctx, convertedArgs)
 		if err != nil {
-			log.Printf("[DEBUG] convertingStmt.ExecContext failed: %v", err)
+			debugLog(" convertingStmt.ExecContext failed: %v", err)
 			return nil, fmt.Errorf("failed to execute statement with context: %w", err)
 		}
-		log.Printf("[DEBUG] convertingStmt.ExecContext succeeded")
+		debugLog(" convertingStmt.ExecContext succeeded")
 		return result, nil
 	}
 	// Direct fallback without using deprecated methods
@@ -279,27 +296,27 @@ func (s *convertingStmt) ExecContext(ctx context.Context, args []driver.NamedVal
 	//nolint:staticcheck // Fallback required for drivers that don't implement StmtExecContext
 	result, err := s.Stmt.Exec(values)
 	if err != nil {
-		log.Printf("[DEBUG] convertingStmt.ExecContext fallback failed: %v", err)
+		debugLog(" convertingStmt.ExecContext fallback failed: %v", err)
 		return nil, fmt.Errorf("failed to execute statement: %w", err)
 	}
-	log.Printf("[DEBUG] convertingStmt.ExecContext fallback succeeded")
+	debugLog(" convertingStmt.ExecContext fallback succeeded")
 	return result, nil
 }
 
 func (s *convertingStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
-	log.Printf("[DEBUG] convertingStmt.QueryContext called with args: %v", args)
+	debugLog(" convertingStmt.QueryContext called with args: %v", args)
 	if stmtCtx, ok := s.Stmt.(driver.StmtQueryContext); ok {
-		log.Printf("[DEBUG] Using StmtQueryContext interface")
+		debugLog(" Using StmtQueryContext interface")
 		convertedArgs := convertNamedValues(args)
 		rows, err := stmtCtx.QueryContext(ctx, convertedArgs)
 		if err != nil {
-			log.Printf("[DEBUG] StmtQueryContext failed: %v", err)
+			debugLog(" StmtQueryContext failed: %v", err)
 			return nil, fmt.Errorf("failed to query statement with context: %w", err)
 		}
-		log.Printf("[DEBUG] StmtQueryContext returned rows: %v (nil: %t)", rows, rows == nil)
+		debugLog(" StmtQueryContext returned rows: %v (nil: %t)", rows, rows == nil)
 		return rows, nil
 	}
-	log.Printf("[DEBUG] Using fallback Stmt.Query")
+	debugLog(" Using fallback Stmt.Query")
 	// Direct fallback without using deprecated methods
 	convertedArgs := convertNamedValues(args)
 	values := make([]driver.Value, len(convertedArgs))
@@ -309,10 +326,10 @@ func (s *convertingStmt) QueryContext(ctx context.Context, args []driver.NamedVa
 	//nolint:staticcheck // Fallback required for drivers that don't implement StmtQueryContext
 	rows, err := s.Stmt.Query(values)
 	if err != nil {
-		log.Printf("[DEBUG] Stmt.Query failed: %v", err)
+		debugLog(" Stmt.Query failed: %v", err)
 		return nil, fmt.Errorf("failed to query statement: %w", err)
 	}
-	log.Printf("[DEBUG] Stmt.Query returned rows: %v (nil: %t)", rows, rows == nil)
+	debugLog(" Stmt.Query returned rows: %v (nil: %t)", rows, rows == nil)
 	return rows, nil
 }
 
@@ -417,10 +434,10 @@ func (dialector Dialector) Initialize(db *gorm.DB) error {
 					log.Printf("[WARNING] This may cause Raw().Row() to return nil. See GORM_ROW_CALLBACK_BUG_ANALYSIS.md")
 				}
 			} else {
-				log.Printf("[DEBUG] Successfully applied RowQuery callback workaround for GORM bug")
+				debugLog(" Successfully applied RowQuery callback workaround for GORM bug")
 			}
 		} else {
-			log.Printf("[DEBUG] GORM version appears to have fixed RowQuery callback, using default implementation")
+			debugLog(" GORM version appears to have fixed RowQuery callback, using default implementation")
 		}
 
 		// Attempt to mark this DB instance as having registered callbacks; ignore
@@ -845,9 +862,9 @@ func shouldApplyRowCallbackFix(db *gorm.DB) bool {
 		if dialector.Config.RowCallbackWorkaround != nil {
 			// Use explicit configuration
 			if *dialector.Config.RowCallbackWorkaround {
-				log.Printf("[DEBUG] RowCallback workaround explicitly enabled via config")
+				debugLog(" RowCallback workaround explicitly enabled via config")
 			} else {
-				log.Printf("[DEBUG] RowCallback workaround explicitly disabled via config")
+				debugLog(" RowCallback workaround explicitly disabled via config")
 			}
 			return *dialector.Config.RowCallbackWorkaround
 		}
@@ -870,7 +887,7 @@ func shouldApplyRowCallbackFix(db *gorm.DB) bool {
 	// return isRowCallbackBroken(db)
 
 	// Currently always apply fix since we know GORM v1.30.2 has the bug
-	log.Printf("[DEBUG] Using default RowCallback workaround behavior (enabled)")
+	debugLog(" Using default RowCallback workaround behavior (enabled)")
 	return true
 }
 
@@ -883,7 +900,7 @@ func isRowCallbackBroken(db *gorm.DB) bool {
 	defer func() {
 		if r := recover(); r != nil {
 			// If the test panics, assume the callback is broken
-			log.Printf("[DEBUG] RowQuery callback test panicked, assuming bug exists: %v", r)
+			debugLog(" RowQuery callback test panicked, assuming bug exists: %v", r)
 		}
 	}()
 
@@ -897,9 +914,9 @@ func isRowCallbackBroken(db *gorm.DB) bool {
 	isBroken := (row == nil)
 
 	if isBroken {
-		log.Printf("[DEBUG] RowQuery callback test detected bug: Raw().Row() returned nil")
+		debugLog(" RowQuery callback test detected bug: Raw().Row() returned nil")
 	} else {
-		log.Printf("[DEBUG] RowQuery callback test passed: Raw().Row() returned valid row")
+		debugLog(" RowQuery callback test passed: Raw().Row() returned valid row")
 	}
 
 	return isBroken

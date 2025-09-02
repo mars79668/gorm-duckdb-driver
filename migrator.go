@@ -125,7 +125,6 @@ func (m Migrator) FullDataTypeOf(field *schema.Field) clause.Expr {
 
 			if tableName != "" {
 				expr.SQL = "BIGINT DEFAULT nextval('seq_" + strings.ToLower(tableName) + "_" + strings.ToLower(field.DBName) + "')"
-			} else {
 			}
 		} else {
 			// Make sure the data type is clean for non-auto-increment primary keys
@@ -291,15 +290,15 @@ func (m Migrator) HasTable(value interface{}) bool {
 			tableName,
 		).Rows()
 		if err != nil {
-			return nil
+			return err
 		}
 		if rows == nil {
-			return nil
+			return fmt.Errorf("rows is nil for table existence query")
 		}
 		defer rows.Close()
 		if rows.Next() {
 			if err := rows.Scan(&count); err != nil {
-				return nil
+				return err
 			}
 		}
 		return nil

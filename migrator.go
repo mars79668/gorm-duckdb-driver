@@ -123,13 +123,9 @@ func (m Migrator) FullDataTypeOf(field *schema.Field) clause.Expr {
 				tableName = m.DB.Statement.Table
 			}
 
-			fmt.Printf("FullDataTypeOf: field=%s, tableName=%q, autoIncrement=%v\n", field.Name, tableName, m.isAutoIncrementField(field))
-
 			if tableName != "" {
 				expr.SQL = "BIGINT DEFAULT nextval('seq_" + strings.ToLower(tableName) + "_" + strings.ToLower(field.DBName) + "')"
-				fmt.Printf("FullDataTypeOf: using DEFAULT sequence: %s\n", expr.SQL)
 			} else {
-				fmt.Printf("FullDataTypeOf: no tableName, not adding DEFAULT sequence\n")
 			}
 		} else {
 			// Make sure the data type is clean for non-auto-increment primary keys

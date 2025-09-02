@@ -1,13 +1,17 @@
 # Codeowners for gorm-duckdb-driver
+
 # Require reviews from maintainers for changes to critical areas
-# Format: <pattern> <owner> <team>
+
+# Format: \<pattern\> \<owner\> \<team\>
 
 # All files - assign to repo owner and maintainers
+
 * @greysquirr3l @sosh-ncampbell
 
 # Docs
+
 /docs/ @greysquirr3l
 
 # Security and CI
-/.github/ @greysquirr3l
 
+/.github/ @greysquirr3l

@@ -40,6 +40,8 @@ github.com/klauspost/compress v1.18.0 h1:c/Cqfb0r+Yi+JtIEq73FWXVkRonBlf0CRNYc8Zt
 github.com/klauspost/compress v1.18.0/go.mod h1:2Pp+KzxcywXVXMr50+X0Q/Lsb43OQHYWRCY2AiWywWQ=
 github.com/klauspost/cpuid/v2 v2.3.0 h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y=
 github.com/klauspost/cpuid/v2 v2.3.0/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
+github.com/marcboeker/go-duckdb v1.8.5 h1:tkYp+TANippy0DaIOP5OEfBEwbUINqiFqgwMQ44jME0=
+github.com/marcboeker/go-duckdb v1.8.5/go.mod h1:6mK7+WQE4P4u5AFLvVBmhFxY5fvhymFptghgJX6B+/8=
 github.com/marcboeker/go-duckdb/arrowmapping v0.0.10 h1:G1W+GVnUefR8uy7jHdNO+CRMsmFG5mFPIHVAespfFCA=
 github.com/marcboeker/go-duckdb/arrowmapping v0.0.10/go.mod h1:jccUb8TYD0p5TsEEeN4SXuslNJHo23QaKOqKD+U6uFU=
 github.com/marcboeker/go-duckdb/mapping v0.0.11 h1:fusN1b1l7Myxafifp596I6dNLNhN5Uv/rw31qAqBwqw=

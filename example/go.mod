@@ -1,10 +1,10 @@
 module example
 
-go 1.24
+go 1.24.0
 
 require (
 	github.com/greysquirr3l/gorm-duckdb-driver v0.0.0-00010101000000-000000000000
-	gorm.io/gorm v1.30.1
+	gorm.io/gorm v1.30.2
 )
 
 // Replace directive to use the local development version
@@ -31,7 +31,7 @@ require (
 	github.com/marcboeker/go-duckdb/v2 v2.3.5 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
-	golang.org/x/exp v0.0.0-20250811191247-51f88131bc50 // indirect
+	golang.org/x/exp v0.0.0-20250819193227-8b4c13bb791b // indirect
 	golang.org/x/mod v0.27.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect

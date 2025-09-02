@@ -3,6 +3,8 @@ package duckdb
 import (
 	"database/sql"
 	"fmt"
+	"reflect"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -10,6 +12,53 @@ import (
 	"gorm.io/gorm/migrator"
 	"gorm.io/gorm/schema"
 )
+
+// normalizeTable splits and strips quotes from a table identifier which may be
+// schema-qualified (e.g. "schema"."table" or schema.table). Returns schema
+// (may be empty) and table name.
+func normalizeTable(table string) (string, string) {
+	if table == "" {
+		return "", ""
+	}
+	// Remove escaped quotes/backticks
+	t := strings.ReplaceAll(table, `\"`, "")
+	t = strings.ReplaceAll(t, `\`+"`", "")
+	t = strings.ReplaceAll(t, `"`, "")
+	t = strings.Trim(t, "`\"")
+	if parts := strings.SplitN(t, ".", 2); len(parts) == 2 {
+		return strings.Trim(parts[0], "`\""), strings.Trim(parts[1], "`\"")
+	}
+	return "", t
+}
+
+// resolveTableName attempts to determine the table identifier for a given value
+// using the provided statement if available, falling back to parsing the model
+// value or using the current DB statement.
+func (m Migrator) resolveTableName(value interface{}, stmt *gorm.Statement) string {
+	if stmt != nil {
+		if stmt.Schema != nil && stmt.Schema.Table != "" {
+			return stmt.Schema.Table
+		}
+		if stmt.Table != "" {
+			return stmt.Table
+		}
+	}
+
+	// Try to parse the model value to obtain schema information
+	if value != nil {
+		s := &gorm.Statement{DB: m.DB}
+		if err := s.Parse(value); err == nil && s.Schema != nil && s.Schema.Table != "" {
+			return s.Schema.Table
+		}
+	}
+
+	// Fallback to DB.Statement if present
+	if m.DB != nil && m.DB.Statement != nil && m.DB.Statement.Table != "" {
+		return m.DB.Statement.Table
+	}
+
+	return ""
+}
 
 const (
 	// SQL data type constants
@@ -39,7 +88,16 @@ func (m Migrator) isAutoIncrementField(field *schema.Field) bool {
 
 // CurrentDatabase returns the current database name.
 func (m Migrator) CurrentDatabase() (name string) {
-	_ = m.DB.Raw("SELECT current_database()").Row().Scan(&name)
+	if m.DB == nil {
+		return "main"
+	}
+	row := m.DB.Raw("SELECT current_database()").Row()
+	if row == nil {
+		return "main"
+	}
+	if err := row.Scan(&name); err != nil {
+		return "main"
+	}
 	return
 }
 
@@ -56,8 +114,18 @@ func (m Migrator) FullDataTypeOf(field *schema.Field) clause.Expr {
 		// DuckDB doesn't support native AUTO_INCREMENT, so we use sequences to emulate this behavior for auto-increment primary keys
 		// Check if this is an auto-increment field (no default value specified)
 		if m.isAutoIncrementField(field) {
-			// Use BIGINT with a default sequence value
-			expr.SQL = "BIGINT DEFAULT nextval('seq_" + strings.ToLower(field.Schema.Table) + "_" + strings.ToLower(field.DBName) + "')"
+			// Use BIGINT with a default sequence value. If field.Schema is nil
+			// try to derive the table name from m.DB.Statement.
+			tableName := ""
+			if field != nil && field.Schema != nil && field.Schema.Table != "" {
+				tableName = field.Schema.Table
+			} else if m.DB != nil && m.DB.Statement != nil && m.DB.Statement.Table != "" {
+				tableName = m.DB.Statement.Table
+			}
+
+			if tableName != "" {
+				expr.SQL = "BIGINT DEFAULT nextval('seq_" + strings.ToLower(tableName) + "_" + strings.ToLower(field.DBName) + "')"
+			}
 		} else {
 			// Make sure the data type is clean for non-auto-increment primary keys
 			upperDataType := strings.ToUpper(dataType)
@@ -205,10 +273,35 @@ func (m Migrator) HasTable(value interface{}) bool {
 	var count int64
 
 	_ = m.RunWithValue(value, func(stmt *gorm.Statement) error {
-		return m.DB.Raw(
-			"SELECT count(*) FROM information_schema.tables WHERE table_name = ? AND table_type = 'BASE TABLE'",
-			stmt.Table,
-		).Row().Scan(&count)
+		// Derive table identifier: prefer schema metadata, fall back to stmt.Table or CurrentTable
+		tableIdentifier := ""
+		if stmt != nil && stmt.Schema != nil && stmt.Schema.Table != "" {
+			tableIdentifier = stmt.Schema.Table
+		} else if stmt != nil && stmt.Table != "" {
+			tableIdentifier = stmt.Table
+		} else {
+			tableIdentifier = fmt.Sprint(m.CurrentTable(stmt))
+		}
+
+		// Normalize table identifier to handle quoted and schema-qualified names
+		_, tableName := normalizeTable(tableIdentifier)
+		rows, err := m.DB.Raw(
+			"SELECT count(*) FROM information_schema.tables WHERE lower(table_name) = lower(?) AND table_type = 'BASE TABLE'",
+			tableName,
+		).Rows()
+		if err != nil {
+			return err
+		}
+		if rows == nil {
+			return fmt.Errorf("rows is nil for table existence query")
+		}
+		defer rows.Close()
+		if rows.Next() {
+			if err := rows.Scan(&count); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 
 	return count > 0
@@ -216,10 +309,24 @@ func (m Migrator) HasTable(value interface{}) bool {
 
 // GetTables returns a list of all table names in the database.
 func (m Migrator) GetTables() (tableList []string, err error) {
-	err = m.DB.Raw(
+	rows, err := m.DB.Raw(
 		"SELECT table_name FROM information_schema.tables WHERE table_type = 'BASE TABLE'",
-	).Scan(&tableList).Error
-	return
+	).Rows()
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		return nil, nil
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err == nil {
+			tableList = append(tableList, name)
+		}
+	}
+	return tableList, nil
 }
 
 // HasColumn checks if a column exists in the database table.
@@ -233,10 +340,33 @@ func (m Migrator) HasColumn(value interface{}, field string) bool {
 			}
 		}
 
-		return m.DB.Raw(
-			"SELECT count(*) FROM information_schema.columns WHERE table_name = ? AND column_name = ?",
-			stmt.Table, name,
-		).Row().Scan(&count)
+		// Derive table identifier similarly to HasTable
+		tableIdentifier := ""
+		if stmt != nil && stmt.Schema != nil && stmt.Schema.Table != "" {
+			tableIdentifier = stmt.Schema.Table
+		} else if stmt != nil && stmt.Table != "" {
+			tableIdentifier = stmt.Table
+		} else {
+			tableIdentifier = fmt.Sprint(m.CurrentTable(stmt))
+		}
+		_, tableName := normalizeTable(tableIdentifier)
+		rows, err := m.DB.Raw(
+			"SELECT count(*) FROM information_schema.columns WHERE lower(table_name) = lower(?) AND lower(column_name) = lower(?)",
+			tableName, name,
+		).Rows()
+		if err != nil {
+			return nil
+		}
+		if rows == nil {
+			return nil
+		}
+		defer rows.Close()
+		if rows.Next() {
+			if err := rows.Scan(&count); err != nil {
+				return nil
+			}
+		}
+		return nil
 	})
 
 	return count > 0
@@ -252,10 +382,32 @@ func (m Migrator) HasIndex(value interface{}, name string) bool {
 			}
 		}
 
-		return m.DB.Raw(
-			"SELECT count(*) FROM information_schema.statistics WHERE table_name = ? AND index_name = ?",
-			stmt.Table, name,
-		).Row().Scan(&count)
+		tableIdentifier := ""
+		if stmt != nil && stmt.Schema != nil && stmt.Schema.Table != "" {
+			tableIdentifier = stmt.Schema.Table
+		} else if stmt != nil && stmt.Table != "" {
+			tableIdentifier = stmt.Table
+		} else {
+			tableIdentifier = fmt.Sprint(m.CurrentTable(stmt))
+		}
+		_, tableName := normalizeTable(tableIdentifier)
+		rows, err := m.DB.Raw(
+			"SELECT count(*) FROM information_schema.statistics WHERE lower(table_name) = lower(?) AND lower(index_name) = lower(?)",
+			tableName, name,
+		).Rows()
+		if err != nil {
+			return nil
+		}
+		if rows == nil {
+			return nil
+		}
+		defer rows.Close()
+		if rows.Next() {
+			if err := rows.Scan(&count); err != nil {
+				return nil
+			}
+		}
+		return nil
 	})
 
 	return count > 0
@@ -270,10 +422,32 @@ func (m Migrator) HasConstraint(value interface{}, name string) bool {
 			name = constraint.GetName()
 		}
 
-		return m.DB.Raw(
-			"SELECT count(*) FROM information_schema.table_constraints WHERE table_name = ? AND constraint_name = ?",
-			table, name,
-		).Row().Scan(&count)
+		// Normalize guessed table name as well
+		tableIdentifier := ""
+		if table != "" {
+			tableIdentifier = table
+		} else {
+			tableIdentifier = fmt.Sprint(m.CurrentTable(stmt))
+		}
+		_, tableName := normalizeTable(tableIdentifier)
+
+		rows, err := m.DB.Raw(
+			"SELECT count(*) FROM information_schema.table_constraints WHERE lower(table_name) = lower(?) AND lower(constraint_name) = lower(?)",
+			tableName, name,
+		).Rows()
+		if err != nil {
+			return nil
+		}
+		if rows == nil {
+			return nil
+		}
+		defer rows.Close()
+		if rows.Next() {
+			if err := rows.Scan(&count); err != nil {
+				return nil
+			}
+		}
+		return nil
 	})
 
 	return count > 0
@@ -337,48 +511,100 @@ func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
 	var columnTypes []gorm.ColumnType
 
 	err := m.RunWithValue(value, func(stmt *gorm.Statement) error {
-		rows, err := m.DB.Raw(`
-			SELECT 
-				column_name,
-				data_type,
-				CASE 
-					WHEN character_maximum_length IS NOT NULL THEN data_type || '(' || character_maximum_length || ')'
-					WHEN numeric_precision IS NOT NULL AND numeric_scale IS NOT NULL THEN data_type || '(' || numeric_precision || ',' || numeric_scale || ')'
-					WHEN numeric_precision IS NOT NULL THEN data_type || '(' || numeric_precision || ')'
-					ELSE data_type
+		// Get table name using the same approach as HasTable
+		tableIdentifier := ""
+		if stmt != nil && stmt.Schema != nil && stmt.Schema.Table != "" {
+			tableIdentifier = stmt.Schema.Table
+		} else if stmt != nil && stmt.Table != "" {
+			tableIdentifier = stmt.Table
+		} else {
+			// Get table name from current table - handle different return types
+			currentTable := m.CurrentTable(stmt)
+			switch v := currentTable.(type) {
+			case string:
+				tableIdentifier = v
+			case clause.Table:
+				tableIdentifier = v.Name
+			default:
+				// If we can't get a table name, try to get all tables and use the first one
+				if tables, gErr := m.GetTables(); gErr == nil && len(tables) > 0 {
+					tableIdentifier = tables[0]
+				}
+			}
+		}
+
+		if tableIdentifier == "" {
+			return nil
+		}
+
+		// Normalize the table identifier
+		_, tableName := normalizeTable(tableIdentifier)
+
+		// Build query for this table
+		query := `
+			SELECT
+				c.column_name,
+				c.data_type,
+				CASE
+					WHEN c.character_maximum_length IS NOT NULL THEN c.data_type || '(' || c.character_maximum_length || ')'
+					WHEN c.numeric_precision IS NOT NULL AND c.numeric_scale IS NOT NULL THEN c.data_type || '(' || c.numeric_precision || ',' || c.numeric_scale || ')'
+					WHEN c.numeric_precision IS NOT NULL THEN c.data_type || '(' || c.numeric_precision || ')'
+					ELSE c.data_type
 				END as column_type,
-				CASE WHEN is_nullable = 'YES' THEN true ELSE false END as nullable,
-				column_default,
-				CASE WHEN column_key = 'PRI' THEN true ELSE false END as is_primary_key,
-				CASE WHEN extra LIKE '%auto_increment%' OR column_default LIKE '%nextval%' THEN true ELSE false END as is_auto_increment,
-				character_maximum_length,
-				numeric_precision,
-				numeric_scale,
-				CASE WHEN column_key = 'UNI' THEN true ELSE false END as is_unique,
-				column_comment
-			FROM information_schema.columns 
-			WHERE table_name = ?
-			ORDER BY ordinal_position
-		`, stmt.Table).Rows()
+				CASE WHEN c.is_nullable = 'YES' THEN true ELSE false END as nullable,
+				c.column_default,
+				COALESCE(pk.is_primary_key, false) as is_primary_key,
+				CASE WHEN c.column_default LIKE '%nextval%' OR c.column_default LIKE '%seq_%' THEN true ELSE false END as is_auto_increment,
+				c.character_maximum_length,
+				c.numeric_precision,
+				c.numeric_scale,
+				COALESCE(uk.is_unique, false) as is_unique,
+				'' as column_comment
+			FROM information_schema.columns c
+			LEFT JOIN (
+				SELECT kcu.column_name, true as is_primary_key
+				FROM information_schema.table_constraints tc
+				JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+				WHERE tc.constraint_type = 'PRIMARY KEY' AND lower(tc.table_name) = lower(?)
+			) pk ON c.column_name = pk.column_name
+			LEFT JOIN (
+				SELECT kcu.column_name, true as is_unique
+				FROM information_schema.table_constraints tc
+				JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+				WHERE tc.constraint_type = 'UNIQUE' AND lower(tc.table_name) = lower(?)
+			) uk ON c.column_name = uk.column_name
+			WHERE lower(c.table_name) = lower(?)
+			ORDER BY c.ordinal_position
+		`
+
+		args := []interface{}{tableName, tableName, tableName}
+
+		rows, err := m.DB.Raw(query, args...).Rows()
 
 		if err != nil {
 			return err
 		}
+		if rows == nil {
+			return nil
+		}
 		defer rows.Close()
 
+		var found int
 		for rows.Next() {
+			found++
 			var (
-				columnName, dataType, columnTypeStr, columnDefault, columnComment string
-				isNullable, isPrimaryKey, isAutoIncrement, isUnique               bool
-				charMaxLength, numericPrecision, numericScale                     sql.NullInt64
+				columnName, dataType, columnTypeStr, columnComment  string
+				columnDefault                                       sql.NullString
+				isNullable, isPrimaryKey, isAutoIncrement, isUnique bool
+				charMaxLength, numericPrecision, numericScale       sql.NullInt64
 			)
 
-			err = rows.Scan(
+			if scanErr := rows.Scan(
 				&columnName, &dataType, &columnTypeStr, &isNullable, &columnDefault,
 				&isPrimaryKey, &isAutoIncrement, &charMaxLength, &numericPrecision,
 				&numericScale, &isUnique, &columnComment,
-			)
-			if err != nil {
+			); scanErr != nil {
+				// Skip malformed rows but continue processing others
 				continue
 			}
 
@@ -391,12 +617,32 @@ func (m Migrator) ColumnTypes(value interface{}) ([]gorm.ColumnType, error) {
 				AutoIncrementValue: sql.NullBool{Bool: isAutoIncrement, Valid: true},
 				UniqueValue:        sql.NullBool{Bool: isUnique, Valid: true},
 				CommentValue:       sql.NullString{String: columnComment, Valid: columnComment != ""},
-				DefaultValueValue:  sql.NullString{String: columnDefault, Valid: columnDefault != ""},
+				DefaultValueValue:  columnDefault,
+				ScanTypeValue:      reflect.TypeOf(""), // Default to string type for safety
 			}
 
-			// Set length information
+			// Set length information defensively
 			if charMaxLength.Valid {
 				columnType.LengthValue = charMaxLength
+			} else {
+				// Prefer schema metadata if available (use closure stmt)
+				if stmt != nil && stmt.Schema != nil {
+					// Look up field by column name
+					if f := stmt.Schema.LookUpField(columnName); f != nil && f.Size > 0 {
+						columnType.LengthValue = sql.NullInt64{Int64: int64(f.Size), Valid: true}
+					} else {
+						// Try to parse from column_type string as fallback
+						if idx := strings.Index(columnTypeStr, "("); idx > 0 {
+							// naive parse between parentheses
+							end := strings.Index(columnTypeStr[idx+1:], ")")
+							if end > 0 {
+								if l, parseErr := strconv.ParseInt(columnTypeStr[idx+1:idx+1+end], 10, 64); parseErr == nil {
+									columnType.LengthValue = sql.NullInt64{Int64: l, Valid: true}
+								}
+							}
+						}
+					}
+				}
 			}
 
 			// Set decimal size information
@@ -421,30 +667,43 @@ func (m Migrator) TableType(value interface{}) (gorm.TableType, error) {
 	var result *migrator.TableType
 
 	err := m.RunWithValue(value, func(stmt *gorm.Statement) error {
-		var schemaName, tableName, tableTypeStr, tableComment string
-
-		err := m.DB.Raw(`
-			SELECT 
+		// Use Rows() and defensive scanning to avoid nil-row panics
+		query := `
+			SELECT
 				table_schema,
 				table_name,
 				table_type,
 				COALESCE(table_comment, '') as table_comment
-			FROM information_schema.tables 
-			WHERE table_name = ?
-		`, stmt.Table).Row().Scan(&schemaName, &tableName, &tableTypeStr, &tableComment)
+			FROM information_schema.tables
+			WHERE lower(table_name) = lower(?)
+		`
 
+		rows, err := m.DB.Raw(query, stmt.Table).Rows()
 		if err != nil {
-			return err
+			return nil
+		}
+		if rows == nil {
+			return nil
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var schemaName, tableName, tableTypeStr, tableComment string
+			if scanErr := rows.Scan(&schemaName, &tableName, &tableTypeStr, &tableComment); scanErr != nil {
+				continue
+			}
+
+			result = &migrator.TableType{
+				SchemaValue:  schemaName,
+				NameValue:    tableName,
+				TypeValue:    tableTypeStr,
+				CommentValue: sql.NullString{String: tableComment, Valid: tableComment != ""},
+			}
+			// Only need first matching row
+			break
 		}
 
-		result = &migrator.TableType{
-			SchemaValue:  schemaName,
-			NameValue:    tableName,
-			TypeValue:    tableTypeStr,
-			CommentValue: sql.NullString{String: tableComment, Valid: tableComment != ""},
-		}
-
-		return nil
+		return rows.Err()
 	})
 
 	if result == nil {
@@ -527,13 +786,21 @@ func (m Migrator) BuildIndexOptions(opts []schema.IndexOption, stmt *gorm.Statem
 func (m Migrator) CreateTable(values ...interface{}) error {
 	for _, value := range values {
 		if err := m.RunWithValue(value, func(stmt *gorm.Statement) error {
-			// First, create sequences for auto-increment primary key fields
+
+			// Get the underlying SQL database connection
+			sqlDB, err := m.DB.DB()
+			if err != nil {
+				return fmt.Errorf("failed to get underlying database: %w", err)
+			}
+
+			// Step 1: Create sequences for auto-increment fields
 			if stmt.Schema != nil {
 				for _, field := range stmt.Schema.Fields {
 					if field.PrimaryKey && (field.AutoIncrement || (!field.HasDefaultValue && field.DataType == schema.Uint)) {
 						sequenceName := "seq_" + strings.ToLower(stmt.Schema.Table) + "_" + strings.ToLower(field.DBName)
 						createSeqSQL := fmt.Sprintf("CREATE SEQUENCE IF NOT EXISTS %s START 1", sequenceName)
-						if err := m.DB.Exec(createSeqSQL).Error; err != nil {
+						_, err := sqlDB.Exec(createSeqSQL)
+						if err != nil {
 							// Ignore "already exists" errors
 							if !isAlreadyExistsError(err) {
 								return fmt.Errorf("failed to create sequence %s: %w", sequenceName, err)
@@ -543,10 +810,60 @@ func (m Migrator) CreateTable(values ...interface{}) error {
 				}
 			}
 
-			// Now create the table using the parent method
-			return m.Migrator.CreateTable(value)
+			// Step 2: Generate CREATE TABLE SQL manually instead of relying on parent migrator
+			tableName := stmt.Schema.Table
+			if tableName == "" {
+				tableName = stmt.Table
+			}
+
+			var columns []string
+			var primaryKeys []string
+
+			for _, field := range stmt.Schema.Fields {
+				columnDef := fmt.Sprintf(`"%s"`, field.DBName)
+
+				// Add data type
+				columnDef += " " + m.Dialector.DataTypeOf(field)
+
+				// Add constraints
+				if field.NotNull {
+					columnDef += " NOT NULL"
+				}
+				if field.PrimaryKey {
+					primaryKeys = append(primaryKeys, fmt.Sprintf(`"%s"`, field.DBName))
+				}
+				if field.Unique {
+					columnDef += " UNIQUE"
+				}
+
+				// Handle auto-increment by setting default to nextval
+				if field.PrimaryKey && (field.AutoIncrement || (!field.HasDefaultValue && field.DataType == schema.Uint)) {
+					sequenceName := "seq_" + strings.ToLower(stmt.Schema.Table) + "_" + strings.ToLower(field.DBName)
+					columnDef += fmt.Sprintf(" DEFAULT nextval('%s')", sequenceName)
+				}
+
+				columns = append(columns, columnDef)
+			}
+
+			// Build CREATE TABLE statement
+			createSQL := fmt.Sprintf(`CREATE TABLE "%s" (%s`, tableName, strings.Join(columns, ","))
+
+			// Add primary key constraint
+			if len(primaryKeys) > 0 {
+				createSQL += fmt.Sprintf(",PRIMARY KEY (%s)", strings.Join(primaryKeys, ","))
+			}
+
+			createSQL += ")"
+
+			// Step 3: Execute CREATE TABLE using the underlying SQL connection
+			_, err = sqlDB.Exec(createSQL)
+			if err != nil {
+				return fmt.Errorf("failed to create table %s: %w", tableName, err)
+			}
+
+			return nil
 		}); err != nil {
-			return fmt.Errorf("failed to create table: %w", err)
+			return fmt.Errorf("failed to create table for value: %w", err)
 		}
 	}
 	return nil

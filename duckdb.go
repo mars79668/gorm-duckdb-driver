@@ -20,10 +20,6 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-// debugLogging controls whether detailed debug logging is enabled
-// Set via environment variable GORM_DUCKDB_DEBUG=true or GORM_DUCKDB_DEBUG=1
-// debugLogging controls whether detailed debug logging is enabled
-// Set via environment variable GORM_DUCKDB_DEBUG=true or GORM_DUCKDB_DEBUG=1
 var debugLogging = os.Getenv("GORM_DUCKDB_DEBUG") == "true" || os.Getenv("GORM_DUCKDB_DEBUG") == "1"
 
 // debugLog logs messages only when debug logging is enabled

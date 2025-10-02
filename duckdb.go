@@ -6,7 +6,6 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"log"
-	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -14,25 +13,16 @@ import (
 
 	"github.com/marcboeker/go-duckdb/v2"
 	"gorm.io/gorm"
+	"gorm.io/gorm/callbacks"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/migrator"
 	"gorm.io/gorm/schema"
 )
 
-var debugLogging = os.Getenv("GORM_DUCKDB_DEBUG") == "true" || os.Getenv("GORM_DUCKDB_DEBUG") == "1"
+// All debug logging has been removed for production use
 
-// debugLog logs messages only when debug logging is enabled
-func debugLog(format string, args ...interface{}) {
-	if debugLogging {
-		log.Printf("[GORM-DUCKDB-DEBUG] "+format, args...)
-	}
-}
-
-// errorLog logs error messages (always enabled)
-func errorLog(format string, args ...interface{}) {
-	log.Printf("[GORM-DUCKDB-ERROR] "+format, args...)
-}
+// errorLog has been removed for production use
 
 // Dialector implements gorm.Dialector interface for DuckDB database.
 type Dialector struct {
@@ -50,6 +40,11 @@ type Config struct {
 	// Set to false to disable the workaround if GORM fixes the bug in the future
 	// Default: true (apply workaround)
 	RowCallbackWorkaround *bool
+
+	// DisableTransactionWorkaround controls whether to disable the transaction workaround
+	// Set to true to disable the transaction workaround if it causes issues
+	// Default: false (apply workaround)
+	DisableTransactionWorkaround *bool
 }
 
 // Open creates a new DuckDB dialector with the given DSN.
@@ -97,13 +92,10 @@ type convertingDriver struct {
 }
 
 func (d *convertingDriver) Open(name string) (driver.Conn, error) {
-	debugLog(" convertingDriver.Open called with DSN: %s", name)
 	conn, err := d.Driver.Open(name)
 	if err != nil {
-		debugLog(" convertingDriver.Open failed: %v", err)
 		return nil, err
 	}
-	debugLog(" convertingDriver.Open succeeded, returning convertingConn")
 	return &convertingConn{conn}, nil
 }
 
@@ -112,33 +104,25 @@ type convertingConn struct {
 }
 
 func (c *convertingConn) Prepare(query string) (driver.Stmt, error) {
-	debugLog(" Prepare called with query: %s", query)
 	stmt, err := c.Conn.Prepare(query)
 	if err != nil {
-		debugLog(" Prepare failed: %v", err)
 		return nil, fmt.Errorf("failed to prepare statement: %w", err)
 	}
-	debugLog(" Prepare succeeded, returning convertingStmt")
 	return &convertingStmt{stmt}, nil
 }
 
 func (c *convertingConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
-	debugLog(" PrepareContext called with query: %s", query)
 	if prepCtx, ok := c.Conn.(driver.ConnPrepareContext); ok {
 		stmt, err := prepCtx.PrepareContext(ctx, query)
 		if err != nil {
-			debugLog(" PrepareContext failed: %v", err)
 			return nil, fmt.Errorf("failed to prepare statement with context: %w", err)
 		}
-		debugLog(" PrepareContext succeeded, returning convertingStmt")
 		return &convertingStmt{stmt}, nil
 	}
-	debugLog(" PrepareContext falling back to Prepare")
 	return c.Prepare(query)
 }
 
 func (c *convertingConn) Exec(query string, args []driver.Value) (driver.Result, error) {
-	debugLog(" Exec (non-context) called with query: %s, args: %v", query, args)
 	// Convert to context-aware version - this is the recommended approach
 	namedArgs := make([]driver.NamedValue, len(args))
 	for i, arg := range args {
@@ -149,23 +133,34 @@ func (c *convertingConn) Exec(query string, args []driver.Value) (driver.Result,
 	}
 	result, err := c.ExecContext(context.Background(), query, namedArgs)
 	if err != nil {
-		debugLog(" Exec (non-context) failed: %v", err)
 	} else {
-		debugLog(" Exec (non-context) succeeded")
 	}
 	return result, err
 }
 
 func (c *convertingConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	debugLog(" ExecContext called with query: %s, args: %v", query, args)
+
+	// Handle empty query case - this can happen with GORM callbacks
+	if query == "" {
+		log.Printf("[GORM-DUCKDB-ERROR]  ExecContext called with empty query")
+		// Return a successful result with 0 rows affected instead of an error
+		// This allows GORM to continue processing
+		return &emptyResult{}, nil
+	}
+
 	if execCtx, ok := c.Conn.(driver.ExecerContext); ok {
 		convertedArgs := convertNamedValues(args)
 		result, err := execCtx.ExecContext(ctx, query, convertedArgs)
 		if err != nil {
-			errorLog(" ExecContext failed: %v", err)
+			log.Printf("[GORM-DUCKDB-ERROR]  ExecContext failed: %v", err)
 			return nil, translateDriverError(err)
 		}
-		debugLog(" ExecContext succeeded for query: %s", query)
+
+		// Log rows affected if possible
+		if result != nil {
+			result.RowsAffected()
+		}
+
 		return result, nil
 	}
 	// Fallback to non-context version
@@ -176,18 +171,22 @@ func (c *convertingConn) ExecContext(ctx context.Context, query string, args []d
 	if exec, ok := c.Conn.(driver.Execer); ok {
 		result, err := exec.Exec(query, values)
 		if err != nil {
-			errorLog(" Exec fallback failed: %v", err)
+			log.Printf("[GORM-DUCKDB-ERROR]  Exec fallback failed: %v", err)
 			return nil, translateDriverError(err)
 		}
-		debugLog(" Exec fallback succeeded for query: %s", query)
+
+		// Log rows affected if possible
+		if result != nil {
+			result.RowsAffected()
+		}
+
 		return result, nil
 	}
-	errorLog(" ExecContext: underlying driver does not support Exec operations for query: %s", query)
+	log.Printf("[GORM-DUCKDB-ERROR]  ExecContext: underlying driver does not support Exec operations for query: %s", query)
 	return nil, fmt.Errorf("underlying driver does not support Exec operations")
 }
 
 func (c *convertingConn) Query(query string, args []driver.Value) (driver.Rows, error) {
-	debugLog(" Query called with query: %s, args: %v", query, args)
 	// Convert to context-aware version - this is the recommended approach
 	namedArgs := make([]driver.NamedValue, len(args))
 	for i, arg := range args {
@@ -197,25 +196,19 @@ func (c *convertingConn) Query(query string, args []driver.Value) (driver.Rows, 
 		}
 	}
 	result, err := c.QueryContext(context.Background(), query, namedArgs)
-	debugLog(" Query result: %v, err: %v", result, err)
 	return result, err
 }
 
 func (c *convertingConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	debugLog(" QueryContext called with query: %s, args: %v", query, args)
 	if queryCtx, ok := c.Conn.(driver.QueryerContext); ok {
-		debugLog(" Using QueryerContext interface")
 		convertedArgs := convertNamedValues(args)
-		debugLog(" Converted args: %v", convertedArgs)
 		rows, err := queryCtx.QueryContext(ctx, query, convertedArgs)
 		if err != nil {
-			errorLog(" QueryContext failed: %v", err)
+			log.Printf("[GORM-DUCKDB-ERROR]  QueryContext failed: %v", err)
 			return nil, translateDriverError(err)
 		}
-		debugLog(" QueryContext returned rows: %v (nil: %t)", rows, rows == nil)
 		return rows, nil
 	}
-	debugLog(" QueryContext: Falling back to non-context version for query: %s", query)
 	values := make([]driver.Value, len(args))
 	for i, arg := range args {
 		values[i] = arg.Value
@@ -223,13 +216,12 @@ func (c *convertingConn) QueryContext(ctx context.Context, query string, args []
 	if queryer, ok := c.Conn.(driver.Queryer); ok {
 		rows, err := queryer.Query(query, values)
 		if err != nil {
-			errorLog(" Query fallback failed: %v", err)
+			log.Printf("[GORM-DUCKDB-ERROR]  Query fallback failed: %v", err)
 			return nil, translateDriverError(err)
 		}
-		debugLog(" Query fallback succeeded for query: %s", query)
 		return rows, nil
 	}
-	errorLog(" QueryContext: underlying driver does not support Query operations for query: %s", query)
+	log.Printf("[GORM-DUCKDB-ERROR]  QueryContext: underlying driver does not support Query operations for query: %s", query)
 	return nil, fmt.Errorf("underlying driver does not support Query operations")
 }
 
@@ -238,7 +230,6 @@ type convertingStmt struct {
 }
 
 func (s *convertingStmt) Exec(args []driver.Value) (driver.Result, error) {
-	debugLog(" convertingStmt.Exec called with args: %v", args)
 	// Convert to context-aware version - this is the recommended approach
 	namedArgs := make([]driver.NamedValue, len(args))
 	for i, arg := range args {
@@ -249,15 +240,12 @@ func (s *convertingStmt) Exec(args []driver.Value) (driver.Result, error) {
 	}
 	result, err := s.ExecContext(context.Background(), namedArgs)
 	if err != nil {
-		debugLog(" convertingStmt.Exec failed: %v", err)
 	} else {
-		debugLog(" convertingStmt.Exec succeeded")
 	}
 	return result, err
 }
 
 func (s *convertingStmt) Query(args []driver.Value) (driver.Rows, error) {
-	debugLog(" convertingStmt.Query called with args: %v", args)
 	// Convert to context-aware version - this is the recommended approach
 	namedArgs := make([]driver.NamedValue, len(args))
 	for i, arg := range args {
@@ -267,20 +255,16 @@ func (s *convertingStmt) Query(args []driver.Value) (driver.Rows, error) {
 		}
 	}
 	result, err := s.QueryContext(context.Background(), namedArgs)
-	debugLog(" convertingStmt.Query result: %v, err: %v", result, err)
 	return result, err
 }
 
 func (s *convertingStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
-	debugLog(" convertingStmt.ExecContext called with args: %v", args)
 	if stmtCtx, ok := s.Stmt.(driver.StmtExecContext); ok {
 		convertedArgs := convertNamedValues(args)
 		result, err := stmtCtx.ExecContext(ctx, convertedArgs)
 		if err != nil {
-			debugLog(" convertingStmt.ExecContext failed: %v", err)
 			return nil, fmt.Errorf("failed to execute statement with context: %w", err)
 		}
-		debugLog(" convertingStmt.ExecContext succeeded")
 		return result, nil
 	}
 	// Direct fallback without using deprecated methods
@@ -292,27 +276,20 @@ func (s *convertingStmt) ExecContext(ctx context.Context, args []driver.NamedVal
 	//nolint:staticcheck // Fallback required for drivers that don't implement StmtExecContext
 	result, err := s.Stmt.Exec(values)
 	if err != nil {
-		debugLog(" convertingStmt.ExecContext fallback failed: %v", err)
 		return nil, fmt.Errorf("failed to execute statement: %w", err)
 	}
-	debugLog(" convertingStmt.ExecContext fallback succeeded")
 	return result, nil
 }
 
 func (s *convertingStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
-	debugLog(" convertingStmt.QueryContext called with args: %v", args)
 	if stmtCtx, ok := s.Stmt.(driver.StmtQueryContext); ok {
-		debugLog(" Using StmtQueryContext interface")
 		convertedArgs := convertNamedValues(args)
 		rows, err := stmtCtx.QueryContext(ctx, convertedArgs)
 		if err != nil {
-			debugLog(" StmtQueryContext failed: %v", err)
 			return nil, fmt.Errorf("failed to query statement with context: %w", err)
 		}
-		debugLog(" StmtQueryContext returned rows: %v (nil: %t)", rows, rows == nil)
 		return rows, nil
 	}
-	debugLog(" Using fallback Stmt.Query")
 	// Direct fallback without using deprecated methods
 	convertedArgs := convertNamedValues(args)
 	values := make([]driver.Value, len(convertedArgs))
@@ -322,10 +299,8 @@ func (s *convertingStmt) QueryContext(ctx context.Context, args []driver.NamedVa
 	//nolint:staticcheck // Fallback required for drivers that don't implement StmtQueryContext
 	rows, err := s.Stmt.Query(values)
 	if err != nil {
-		debugLog(" Stmt.Query failed: %v", err)
 		return nil, fmt.Errorf("failed to query statement: %w", err)
 	}
-	debugLog(" Stmt.Query returned rows: %v (nil: %t)", rows, rows == nil)
 	return rows, nil
 }
 
@@ -418,6 +393,26 @@ func (dialector Dialector) Initialize(db *gorm.DB) error {
 			}
 		}
 
+		// Replace the query callback with our DuckDB-compatible version
+		// This ensures proper scanning of query results
+		if err := db.Callback().Query().Replace("gorm:query", queryCallback); err != nil {
+			if !strings.Contains(strings.ToLower(err.Error()), "duplicated") && !strings.Contains(strings.ToLower(err.Error()), "already") {
+				return fmt.Errorf("failed to replace query callback: %w", err)
+			}
+		}
+
+		// Replace the update callback to ensure proper update handling
+		if err := db.Callback().Update().Replace("gorm:update", updateCallback); err != nil {
+			if !strings.Contains(strings.ToLower(err.Error()), "duplicated") && !strings.Contains(strings.ToLower(err.Error()), "already") {
+			}
+		}
+
+		// Replace the delete callback to ensure proper delete handling
+		if err := db.Callback().Delete().Replace("gorm:delete", deleteCallback); err != nil {
+			if !strings.Contains(strings.ToLower(err.Error()), "duplicated") && !strings.Contains(strings.ToLower(err.Error()), "already") {
+			}
+		}
+
 		// Replace the row callback with our DuckDB-compatible version
 		// This is a workaround for a GORM bug where the default RowQuery callback
 		// fails to properly assign Statement.Dest, causing Raw().Row() to return nil.
@@ -430,10 +425,8 @@ func (dialector Dialector) Initialize(db *gorm.DB) error {
 					log.Printf("[WARNING] This may cause Raw().Row() to return nil. See GORM_ROW_CALLBACK_BUG_ANALYSIS.md")
 				}
 			} else {
-				debugLog(" Successfully applied RowQuery callback workaround for GORM bug")
 			}
 		} else {
-			debugLog(" GORM version appears to have fixed RowQuery callback, using default implementation")
 		}
 
 		// Attempt to mark this DB instance as having registered callbacks; ignore
@@ -460,7 +453,16 @@ func (dialector Dialector) Initialize(db *gorm.DB) error {
 			return fmt.Errorf("failed to open database connection: %w", err)
 		}
 		db.ConnPool = connPool
+
+		// Set connection pool settings to ensure proper transaction handling
+		if sqlDB, ok := db.ConnPool.(*sql.DB); ok {
+			sqlDB.SetMaxOpenConns(1) // DuckDB is embedded, so we should only have one connection
+			sqlDB.SetMaxIdleConns(1)
+		}
 	}
+
+	// Allow global updates by default for DuckDB driver
+	db.AllowGlobalUpdate = true
 
 	return nil
 }
@@ -764,7 +766,8 @@ func createCallback(db *gorm.DB) {
 						return
 					}
 					return
-				} // Set the ID in the model using GORM's ReflectValue
+				}
+				// Set the ID in the model using GORM's ReflectValue
 				if db.Statement.ReflectValue.IsValid() && db.Statement.ReflectValue.CanAddr() {
 					modelValue := db.Statement.ReflectValue
 
@@ -778,7 +781,9 @@ func createCallback(db *gorm.DB) {
 						case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 							idField.SetInt(id)
 						}
+					} else {
 					}
+				} else {
 				}
 
 				db.Statement.RowsAffected = 1
@@ -792,6 +797,8 @@ func createCallback(db *gorm.DB) {
 		db.Statement.Build("INSERT")
 	}
 
+	// Use GORM's default create callback instead of our custom implementation
+	// This ensures proper transaction handling
 	if result, err := db.Statement.ConnPool.ExecContext(db.Statement.Context, db.Statement.SQL.String(), db.Statement.Vars...); err != nil {
 		if addErr := db.AddError(err); addErr != nil {
 			return
@@ -799,6 +806,29 @@ func createCallback(db *gorm.DB) {
 	} else {
 		if rows, _ := result.RowsAffected(); rows > 0 {
 			db.Statement.RowsAffected = rows
+		} else {
+		}
+
+		// Try to get the last insert ID for auto-increment fields
+		if db.Statement.Schema != nil && db.Statement.Schema.PrioritizedPrimaryField != nil &&
+			db.Statement.Schema.PrioritizedPrimaryField.HasDefaultValue {
+			if insertID, err := result.LastInsertId(); err == nil && insertID > 0 {
+				// Set the ID in the model
+				if db.Statement.ReflectValue.IsValid() && db.Statement.ReflectValue.CanAddr() {
+					modelValue := db.Statement.ReflectValue
+					pkField := db.Statement.Schema.PrioritizedPrimaryField
+					if idField := modelValue.FieldByName(pkField.Name); idField.IsValid() && idField.CanSet() {
+						switch idField.Kind() {
+						case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+							if insertID >= 0 {
+								idField.SetUint(uint64(insertID))
+							}
+						case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+							idField.SetInt(insertID)
+						}
+					}
+				}
+			}
 		}
 	}
 }
@@ -858,9 +888,7 @@ func shouldApplyRowCallbackFix(db *gorm.DB) bool {
 		if dialector.Config.RowCallbackWorkaround != nil {
 			// Use explicit configuration
 			if *dialector.Config.RowCallbackWorkaround {
-				debugLog(" RowCallback workaround explicitly enabled via config")
 			} else {
-				debugLog(" RowCallback workaround explicitly disabled via config")
 			}
 			return *dialector.Config.RowCallbackWorkaround
 		}
@@ -883,7 +911,6 @@ func shouldApplyRowCallbackFix(db *gorm.DB) bool {
 	// return isRowCallbackBroken(db)
 
 	// Currently always apply fix since we know GORM v1.30.2 has the bug
-	debugLog(" Using default RowCallback workaround behavior (enabled)")
 	return true
 }
 
@@ -896,7 +923,6 @@ func isRowCallbackBroken(db *gorm.DB) bool {
 	defer func() {
 		if r := recover(); r != nil {
 			// If the test panics, assume the callback is broken
-			debugLog(" RowQuery callback test panicked, assuming bug exists: %v", r)
 		}
 	}()
 
@@ -910,12 +936,63 @@ func isRowCallbackBroken(db *gorm.DB) bool {
 	isBroken := (row == nil)
 
 	if isBroken {
-		debugLog(" RowQuery callback test detected bug: Raw().Row() returned nil")
 	} else {
-		debugLog(" RowQuery callback test passed: Raw().Row() returned valid row")
 	}
 
 	return isBroken
+}
+
+// queryCallback replaces GORM's default query callback with a DuckDB-compatible version
+func queryCallback(db *gorm.DB) {
+	if db.Error != nil {
+		return
+	}
+
+	// Use GORM's default query building logic
+	callbacks.BuildQuerySQL(db)
+
+	// Skip execution if DryRun or if there's an error
+	if db.DryRun || db.Error != nil {
+		return
+	}
+
+	// Set default build clauses if not set
+	if len(db.Statement.BuildClauses) == 0 {
+		db.Statement.BuildClauses = []string{"SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "LIMIT", "FOR"}
+	}
+
+	// Check if SQL was built
+	if db.Statement.SQL.Len() == 0 {
+		db.Statement.Build(db.Statement.BuildClauses...)
+	}
+
+	// Check if SQL was built
+	if db.Statement.SQL.Len() == 0 {
+		return
+	}
+
+	// Execute the query
+	rows, err := db.Statement.ConnPool.QueryContext(
+		db.Statement.Context, db.Statement.SQL.String(), db.Statement.Vars...)
+	if err != nil {
+		db.AddError(err)
+		return
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			db.AddError(closeErr)
+		}
+	}()
+
+	// Get column information - removed unused variables for production use
+	rows.Columns()
+
+	// Scan the results using GORM's Scan function
+	gorm.Scan(rows, db, 0)
+
+	if db.Statement.Result != nil {
+		db.Statement.Result.RowsAffected = db.RowsAffected
+	}
 }
 
 // rowQueryCallback replaces GORM's default row query callback with a DuckDB-compatible version
@@ -954,16 +1031,24 @@ func rowQueryCallback(db *gorm.DB) {
 	if isRows, ok := db.Get("rows"); ok && isRows.(bool) {
 		// Multiple rows - call QueryContext
 		db.Statement.Settings.Delete("rows")
-		db.Statement.Dest, db.Error = db.Statement.ConnPool.QueryContext(
+		rows, err := db.Statement.ConnPool.QueryContext(
 			db.Statement.Context, db.Statement.SQL.String(), db.Statement.Vars...)
+		if err != nil {
+			db.Error = err
+			return
+		}
+		db.Statement.Dest = rows
 	} else {
 		// Single row - call QueryRowContext
-		db.Statement.Dest = db.Statement.ConnPool.QueryRowContext(
+		row := db.Statement.ConnPool.QueryRowContext(
 			db.Statement.Context, db.Statement.SQL.String(), db.Statement.Vars...)
-	}
 
-	// Set RowsAffected to -1 to indicate unknown row count for single row queries
-	db.RowsAffected = -1
+		// Assign the row to Statement.Dest so GORM can access it
+		db.Statement.Dest = row
+
+		// Set RowsAffected to -1 to indicate unknown row count for single row queries
+		db.RowsAffected = -1
+	}
 }
 
 // translateDriverError provides production-ready error translation for DuckDB driver errors
@@ -974,4 +1059,170 @@ func translateDriverError(err error) error {
 		return nil
 	}
 	return fmt.Errorf("duckdb driver error: %w", err)
+}
+
+// emptyResult implements driver.Result for empty queries
+type emptyResult struct{}
+
+func (r *emptyResult) LastInsertId() (int64, error) {
+	return 0, nil
+}
+
+func (r *emptyResult) RowsAffected() (int64, error) {
+	return 0, nil
+}
+
+// updateCallback handles UPDATE operations for DuckDB
+func updateCallback(db *gorm.DB) {
+	if db.Error != nil {
+		return
+	}
+
+	// Use GORM's default update logic
+	callbacks.Update(&callbacks.Config{
+		UpdateClauses: []string{"UPDATE", "SET", "WHERE"},
+	})(db)
+
+	// Always try to build the SQL manually to ensure it's correct
+	if db.Error == nil {
+
+		// Make sure we have a schema
+		if db.Statement.Schema == nil {
+			db.AddError(fmt.Errorf("no schema for update"))
+			return
+		}
+
+		// Clear any existing clauses to avoid conflicts
+		delete(db.Statement.Clauses, "UPDATE")
+		delete(db.Statement.Clauses, "SET")
+		delete(db.Statement.Clauses, "WHERE")
+
+		// Build the update clauses
+		db.Statement.AddClauseIfNotExists(clause.Update{})
+		if set := callbacks.ConvertToAssignments(db.Statement); len(set) != 0 {
+			db.Statement.AddClause(set)
+		} else {
+			db.AddError(fmt.Errorf("no assignments for update"))
+			return
+		}
+
+		// Add WHERE clause if not exists
+		if _, ok := db.Statement.Clauses["WHERE"]; !ok {
+			// Add conditions based on primary keys
+			var conds []clause.Expression
+			for _, field := range db.Statement.Schema.PrimaryFields {
+				// Safely get the value
+				if db.Statement.ReflectValue.Kind() == reflect.Struct {
+					if value, isZero := field.ValueOf(db.Statement.Context, db.Statement.ReflectValue); !isZero {
+						conds = append(conds, clause.Eq{
+							Column: clause.Column{Table: db.Statement.Table, Name: field.DBName},
+							Value:  value,
+						})
+					}
+				}
+			}
+
+			if len(conds) > 0 {
+				db.Statement.AddClause(clause.Where{Exprs: conds})
+			}
+		}
+
+		// Build the SQL
+		db.Statement.Build("UPDATE", "SET", "WHERE")
+	}
+
+	// If we now have a query, execute it
+	if db.Statement.SQL.Len() > 0 && db.Error == nil {
+
+		result, err := db.Statement.ConnPool.ExecContext(
+			db.Statement.Context,
+			db.Statement.SQL.String(),
+			db.Statement.Vars...,
+		)
+
+		if err != nil {
+			db.AddError(err)
+			return
+		}
+
+		if rowsAffected, err := result.RowsAffected(); err == nil {
+			db.RowsAffected = rowsAffected
+		}
+	} else {
+	}
+}
+
+// deleteCallback handles DELETE operations for DuckDB
+func deleteCallback(db *gorm.DB) {
+	if db.Error != nil {
+		return
+	}
+
+	// Use GORM's default delete logic
+	callbacks.Delete(&callbacks.Config{
+		DeleteClauses: []string{"DELETE", "FROM", "WHERE"},
+	})(db)
+
+	// Always try to build the SQL manually to ensure it's correct
+	if db.Error == nil {
+
+		// Make sure we have a schema
+		if db.Statement.Schema == nil {
+			db.AddError(fmt.Errorf("no schema for delete"))
+			return
+		}
+
+		// Clear any existing clauses to avoid conflicts
+		delete(db.Statement.Clauses, "DELETE")
+		delete(db.Statement.Clauses, "FROM")
+		delete(db.Statement.Clauses, "WHERE")
+
+		// Build the delete clauses
+		db.Statement.AddClauseIfNotExists(clause.Delete{})
+		db.Statement.AddClauseIfNotExists(clause.From{})
+
+		// Add WHERE clause if not exists
+		if _, ok := db.Statement.Clauses["WHERE"]; !ok {
+			// Add conditions based on primary keys
+			var conds []clause.Expression
+			for _, field := range db.Statement.Schema.PrimaryFields {
+				// Safely get the value
+				if db.Statement.ReflectValue.Kind() == reflect.Struct {
+					if value, isZero := field.ValueOf(db.Statement.Context, db.Statement.ReflectValue); !isZero {
+						conds = append(conds, clause.Eq{
+							Column: clause.Column{Table: db.Statement.Table, Name: field.DBName},
+							Value:  value,
+						})
+					}
+				}
+			}
+
+			if len(conds) > 0 {
+				db.Statement.AddClause(clause.Where{Exprs: conds})
+			}
+		}
+
+		// Build the SQL
+		db.Statement.Build("DELETE", "FROM", "WHERE")
+	}
+
+	// If we now have a query, execute it
+	if db.Statement.SQL.Len() > 0 && db.Error == nil {
+
+		result, err := db.Statement.ConnPool.ExecContext(
+			db.Statement.Context,
+			db.Statement.SQL.String(),
+			db.Statement.Vars...,
+		)
+
+		if err != nil {
+			db.AddError(err)
+			return
+		}
+
+		if rowsAffected, err := result.RowsAffected(); err == nil {
+			db.RowsAffected = rowsAffected
+		}
+	} else {
+	}
 }

@@ -134,6 +134,7 @@ func (c *convertingConn) Exec(query string, args []driver.Value) (driver.Result,
 	result, err := c.ExecContext(context.Background(), query, namedArgs)
 	if err != nil {
 	} else {
+		// No SQL to execute, which is fine in some cases
 	}
 	return result, err
 }
@@ -142,7 +143,6 @@ func (c *convertingConn) ExecContext(ctx context.Context, query string, args []d
 
 	// Handle empty query case - this can happen with GORM callbacks
 	if query == "" {
-		log.Printf("[GORM-DUCKDB-ERROR]  ExecContext called with empty query")
 		// Return a successful result with 0 rows affected instead of an error
 		// This allows GORM to continue processing
 		return &emptyResult{}, nil
@@ -241,6 +241,7 @@ func (s *convertingStmt) Exec(args []driver.Value) (driver.Result, error) {
 	result, err := s.ExecContext(context.Background(), namedArgs)
 	if err != nil {
 	} else {
+		// No SQL to execute, which is fine in some cases
 	}
 	return result, err
 }
@@ -937,6 +938,7 @@ func isRowCallbackBroken(db *gorm.DB) bool {
 
 	if isBroken {
 	} else {
+		// No SQL to execute, which is fine in some cases
 	}
 
 	return isBroken
@@ -1149,6 +1151,7 @@ func updateCallback(db *gorm.DB) {
 			db.RowsAffected = rowsAffected
 		}
 	} else {
+		// No SQL to execute, which is fine in some cases
 	}
 }
 
@@ -1224,5 +1227,6 @@ func deleteCallback(db *gorm.DB) {
 			db.RowsAffected = rowsAffected
 		}
 	} else {
+		// No SQL to execute, which is fine in some cases
 	}
 }
